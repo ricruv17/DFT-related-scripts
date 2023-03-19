@@ -1,6 +1,6 @@
 : 'Script tht generates the xyz file of the initial and final positions from the aims calculation. It takes the output file from aims as only argument.
 
-To execute run:
+To execute, run:
 bash aims2xyz.sh OUTPUT_FILE.out
 '
 # 0. Create temporal files containing format instructions for xyz files
