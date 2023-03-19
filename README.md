@@ -1,2 +1,4 @@
 # MONA-scripts
-Here lie the scripts that MONA group uses
+Here lie the scripts that MONA group in King Abdullah University of Science and Technology (KAUST) uses.
+
+Instructions on how to use each script are written as a comment at the beginning of each file.
