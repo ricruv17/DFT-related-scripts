@@ -21,12 +21,17 @@ def store_files_in_list(filename):
             lines = []
             for line in file_in:
                 lines.append(line)
+        if filename == 'aims.out':
+            print(f'\nFile {filename} found in the current folder.\nOpening now...')
         if 'Invoking FHI-aims ...' not in lines[1]:
             print(f'\nERROR: File {filename} is not a FHI-aims output file.')
             return store_files_in_list(input('Please enter the name of a valid FHI-aims output file:\n'))
         return lines
     except FileNotFoundError:
-        print(f'\nERROR: File {filename} was not found in the current folder.')
+        if filename == 'aims.out':
+            print(f'\nFile {filename} was not found in the current folder.')
+        else:
+            print(f'\nERROR: File {filename} was not found in the current folder.')
         return store_files_in_list(input('Please enter the name of a valid FHI-aims output file:\n'))
 
 
@@ -55,7 +60,7 @@ def ask_type_of_energy():
 
 
 # 2. Determine the number of KS states and the energy tolerance in the system
-file_name = input('Enter the name of the FHI-aims output file:\n')
+file_name = 'aims.out'
 file = store_files_in_list(file_name)
 
 if 'Have a nice day.' not in file[-2]:
@@ -337,4 +342,3 @@ else:
 
     plt.tight_layout()
     plt.show()
-
