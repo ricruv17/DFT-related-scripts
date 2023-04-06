@@ -2,11 +2,11 @@
 Script to plot the HOMO and LUMO (plus any amount of neighboring orbitals) orbitals from an output file of FHI-aims.
 Written by Ricardo Ruvalcaba at MONA-group in King Abdullah University of Science and Technology (KAUST).
 Contact: ricardo.ruvalcababriones@kaust.edu.sa
-This is version 2 (19/03/23)
+This is version 2 (19/03/23). No known bugs.
 
 When executed, the script will ask for all the information.
 To execute, just run on your bash terminal:
-python3 FILENAME.out
+python3 plot_HOMO_LUMO_energies.py
 '''
 
 # 0. Import useful packages
