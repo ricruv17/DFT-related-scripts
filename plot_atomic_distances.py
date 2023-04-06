@@ -3,16 +3,16 @@ Script to graph the geometric structure of a molecule from a xyz file, while rep
  colors.
 Written by Ricardo Ruvalcaba at MONA-group in King Abdullah University of Science and Technology (KAUST).
 Contact: ricardo.ruvalcababriones@kaust.edu.sa
-This is version 1 (28/03/23)
-    Issues to fix:
+Version 1 (28/03/23) known bugs:
     - When plotting the bonds between all atoms except H, bonds further away from the real bonding distances are
     detected in metallic atoms. Those bonds are being hidden, but the colorbar is scaled incorrectly.
+This is version 2 (06/04/23). No known bugs.
 
 Atomic radii and colors taken from xyz2graph program (https://github.com/zotko/xyz2graph).
 
 When executed, the script will ask for all the necessary information.
 To execute, just run on your bash terminal:
-python3 FILENAME.xyz
+python3 plot_atomic_distances.py
 """
 
 import matplotlib.pyplot as plt
@@ -21,6 +21,7 @@ import matplotlib as mpl
 
 bond_constant = 2.2
 font_size = 16
+angle_criteria = 10 * np.pi/180  # in radians
 
 atomic_radii = dict(
     Ac=1.88,
@@ -158,6 +159,8 @@ class MoleculeGraph:
         self.z = []
         self.atomic_radii = []
         self.interatomic_distances = []
+        self.interatomic_angles = []
+        self.is_bond_plotted_matrix = []
         self.min_bond_distance = 100
         self.max_bond_distance = 0
         self.no_atoms = 0
@@ -185,8 +188,12 @@ class MoleculeGraph:
                 self.y.append(float(line[2]))
                 self.z.append(float(line[3]))
             self.atomic_radii = [atomic_radii[element] for element in self.elements]
+            self.translate_molecules_centroid_to_origin()
+            self.rotate_molecule_towards_z_axis()
+            self.align_molecule_with_x_axis()
             self.ask_type_of_bonds_drawn()
-            self.calculate_interatomic_distances()
+            self.calculate_interatomic_distances_and_angles()
+            self.exclude_nonbonding_atoms()
         except FileNotFoundError:
             if filename == 'final_positions.xyz':
                 print('\n' + error_message)
@@ -194,57 +201,15 @@ class MoleculeGraph:
                 print('\nERROR: ' + error_message)
             return self.read_xyz_file(input('Please enter the name of a valid xyz file:\n'))
 
-    def ask_type_of_bonds_drawn(self):
-        # Asks the user if only C-C or all types of bonds (except H) will be plotted.
-        selection = input('\nSelect the type of bonds you want to plot: (1) C-C only or (2) all except H: ')
-        while selection != '1' and selection != '2':
-            print('\nERROR: Only values 1 or 2 are allowed.')
-            selection = input('Please enter a valid number: ')
-        if selection == '1':
-            self.draw_only_carbon_bonds = True
-        elif selection == '2':
-            self.draw_only_carbon_bonds = False
-
-    def calculate_interatomic_distances(self):
-        # Generates a matrix with distances between each atom as its elements.
-        for atom1_index in range(self.no_atoms):
-            atom1_element = self.elements[atom1_index]
-            atom1_radius = atomic_radii[self.elements[atom1_index]]
-            x1 = self.x[atom1_index]
-            y1 = self.y[atom1_index]
-            z1 = self.z[atom1_index]
-            atom1_distances = []
-            for atom2_index in range(self.no_atoms):
-                atom2_element = self.elements[atom2_index]
-                atom2_radius = atomic_radii[self.elements[atom2_index]]
-                x2 = self.x[atom2_index]
-                y2 = self.y[atom2_index]
-                z2 = self.z[atom2_index]
-                distance = np.sqrt((x1-x2)**2 + (y1-y2)**2 + (z1-z2)**2)
-                atom1_distances.append(distance)
-                max_radius = max(atom1_radius, atom2_radius)
-                if self.draw_only_carbon_bonds:
-                    both_atoms_are_carbons = atom1_element == 'C' and atom2_element == 'C'
-                    if self.max_bond_distance < distance <= max_radius*bond_constant and both_atoms_are_carbons:
-                        self.max_bond_distance = distance
-                    elif 0 != distance < self.min_bond_distance and both_atoms_are_carbons:
-                        self.min_bond_distance = distance
-                else:
-                    if self.max_bond_distance < distance <= max_radius*bond_constant:
-                        self.max_bond_distance = distance
-                    elif 0 != distance < self.min_bond_distance and atom1_element != 'H' and atom2_element != 'H':
-                        self.min_bond_distance = distance
-            self.interatomic_distances.append(atom1_distances)
-
-    def translate_molecules_geometric_center_to_origin(self):
+    def translate_molecules_centroid_to_origin(self):
         # Name is self-explanatory.
-        geometric_center_x = sum(self.x)/self.no_atoms
-        geometric_center_y = sum(self.y)/self.no_atoms
-        geometric_center_z = sum(self.z)/self.no_atoms
+        centroid_x = sum(self.x)/self.no_atoms
+        centroid_y = sum(self.y)/self.no_atoms
+        centroid_z = sum(self.z)/self.no_atoms
         for index in range(self.no_atoms):
-            self.x[index] -= geometric_center_x
-            self.y[index] -= geometric_center_y
-            self.z[index] -= geometric_center_z
+            self.x[index] -= centroid_x
+            self.y[index] -= centroid_y
+            self.z[index] -= centroid_z
 
     def rotate_molecule_towards_z_axis(self):
         # Name is self-explanatory. Sections of the function will be explained.
@@ -292,18 +257,119 @@ class MoleculeGraph:
             rf = np.matmul(rot_matrix, r0)
             self.x[index], self.y[index] = rf
 
+    def ask_type_of_bonds_drawn(self):
+        # Asks the user if only C-C or all types of bonds (except H) will be plotted.
+        selection = input('\nSelect the type of bonds you want to plot: (1) C-C only or (2) all except H: ')
+        while selection != '1' and selection != '2':
+            print('\nERROR: Only values 1 or 2 are allowed.')
+            selection = input('Please enter a valid number: ')
+        if selection == '1':
+            self.draw_only_carbon_bonds = True
+        elif selection == '2':
+            self.draw_only_carbon_bonds = False
+
+    def calculate_interatomic_distances_and_angles(self):
+        # Generates matrices with distances, angles and bonding availability between each atom as its elements.
+        for atom1_index in range(self.no_atoms):
+            x1 = self.x[atom1_index]
+            y1 = self.y[atom1_index]
+            z1 = self.z[atom1_index]
+            atom1_distances = []
+            atom1_angles = []
+            for atom2_index in range(self.no_atoms):
+                x2 = self.x[atom2_index]
+                y2 = self.y[atom2_index]
+                z2 = self.z[atom2_index]
+                distance = np.sqrt((x1-x2)**2 + (y1-y2)**2 + (z1-z2)**2)
+                atom1_distances.append(distance)
+                bond_angle = self.determine_bond_angle(x1, y1, x2, y2)
+                atom1_angles.append(bond_angle)
+            self.interatomic_distances.append(atom1_distances)
+            self.interatomic_angles.append(atom1_angles)
+            self.is_bond_plotted_matrix.append([1] * len(atom1_distances))
+
+    @staticmethod
+    def determine_bond_angle(x1, y1, x2, y2):
+        # Name is self-explanatory.
+        delta_x = x2 - x1
+        delta_y = y2 - y1
+        if delta_y == 0 and delta_x == 0:
+            return 361
+        if delta_x == 0 and delta_y > 0:
+            return np.pi / 2
+        elif delta_x == 0 and delta_y < 0:
+            return -np.pi / 2
+        angle = np.arctan(delta_y / delta_x)
+        if delta_y >= 0:
+            if delta_x >= 0:
+                angle += 0
+            elif delta_x <= 0:
+                angle += 2 * np.pi / 2
+        elif delta_y <= 0:
+            if delta_x <= 0:
+                angle += 2 * np.pi / 2
+            elif delta_x >= 0:
+                angle += 4 * np.pi / 2
+        return angle
+
+    def exclude_nonbonding_atoms(self):
+        # Name is self-explanatory. Works based on several criteria, further commented in the function.
+        bonding_distances = set()
+        for atom1_index in range(self.no_atoms):
+            atom1_element = self.elements[atom1_index]
+            atom1_radius = atomic_radii[self.elements[atom1_index]]
+            atom1_distances = self.interatomic_distances[atom1_index]
+            forbidden_angles = []
+            for distance in sorted(atom1_distances):
+                atom2_index = atom1_distances.index(distance)
+                atom2_element = self.elements[atom2_index]
+                atom2_radius = atomic_radii[self.elements[atom2_index]]
+                # 1. Exclude double counting a bond and self-bond.
+                if atom1_index >= atom2_index:
+                    self.is_bond_plotted_matrix[atom1_index][atom2_index] = 0
+                else:
+                    self.is_bond_plotted_matrix[atom1_index][atom2_index] = 1
+                # 2. Exclude bonds to all atoms but carbon or only hydrogen depending on the user's choice.
+                both_atoms_are_carbons = atom1_element == 'C' and atom2_element == 'C'
+                one_atom_is_hydrogen = atom1_element == 'H' or atom2_element == 'H'
+                if self.draw_only_carbon_bonds:
+                    self.is_bond_plotted_matrix[atom1_index][atom2_index] *= both_atoms_are_carbons
+                else:
+                    self.is_bond_plotted_matrix[atom1_index][atom2_index] *= not one_atom_is_hydrogen
+                # 3. Exclude bonds that are too long.
+                max_radius = max(atom1_radius, atom2_radius)
+                atom_is_within_allowed_radius = distance <= max_radius*bond_constant
+                self.is_bond_plotted_matrix[atom1_index][atom2_index] *= atom_is_within_allowed_radius
+                # 4. Exclude bonds that have the allowed distance but are in the same direction as a known bond.
+                angle = self.interatomic_angles[atom1_index][atom2_index]
+                is_allowed_angle = self.determine_if_angle_is_allowed(angle, forbidden_angles)
+                self.is_bond_plotted_matrix[atom1_index][atom2_index] *= is_allowed_angle
+                if is_allowed_angle:
+                    forbidden_angles.append([angle - angle_criteria / 2, angle + angle_criteria / 2])
+                bonding_distances.add(
+                    self.is_bond_plotted_matrix[atom1_index][atom2_index] * self.interatomic_distances[atom1_index][
+                        atom2_index])
+        bonding_distances = sorted(list(bonding_distances))
+        self.min_bond_distance = bonding_distances[1]
+        self.max_bond_distance = bonding_distances[-1]
+
+    @staticmethod
+    def determine_if_angle_is_allowed(angle, forbidden_angles):
+        # Name is self-explanatory.
+        for nth_range in forbidden_angles:
+            if nth_range[0] < angle < nth_range[1]:
+                return False
+        return True
+
     def plot_molecule(self):
         # Name is self-explanatory. Sections of the function will be explained.
         # 0. Create the figure and colormap objects and position the molecule for correct visualization.
-        fig = plt.figure(figsize=[int(max(self.x) * 1.5), int(max(self.y) * 2)])
+        fig = plt.figure(figsize=[6, 6])
         ax = fig.add_subplot(1, 1, 1)
         cmap = plt.get_cmap("coolwarm")
         norm = mpl.colors.Normalize(self.min_bond_distance, self.max_bond_distance)
-        self.translate_molecules_geometric_center_to_origin()
-        self.rotate_molecule_towards_z_axis()
-        self.align_molecule_with_x_axis()
         # 1. Plot the atoms.
-        for atom in range(len(self.x)):
+        for atom in range(self.no_atoms):
             x = self.x[atom]
             y = self.y[atom]
             size = atomic_radii[self.elements[atom]]
@@ -314,27 +380,15 @@ class MoleculeGraph:
             ax.scatter(x, y, s=100*size, c=color)
         # 2. Plot the bonds between atoms with colors depending on length according to user's choice.
         for atom1_index in range(self.no_atoms):
-            atom1_radius = atomic_radii[self.elements[atom1_index]]
-            atom1_element = self.elements[atom1_index]
             x1 = self.x[atom1_index]
             y1 = self.y[atom1_index]
-            for atom2_index in range(atom1_index, self.no_atoms):
-                atom2_radius = atomic_radii[self.elements[atom2_index]]
-                atom2_element = self.elements[atom2_index]
+            for atom2_index in range(atom1_index + 1, self.no_atoms):
                 x2 = self.x[atom2_index]
                 y2 = self.y[atom2_index]
                 distance = self.interatomic_distances[atom1_index][atom2_index]
-                max_radius = max(atom1_radius, atom2_radius)
-                if self.draw_only_carbon_bonds:
-                    both_atoms_are_carbons = atom1_element == 'C' and atom2_element == 'C'
-                    if distance <= max_radius * bond_constant and both_atoms_are_carbons:
-                        ax.plot([x1, x2], [y1, y2], linewidth=10 * atomic_radii['C'], color=cmap(norm(distance)),
-                                zorder=-distance)
-                else:
-                    if distance <= max_radius*bond_constant and atom1_element != 'H' and atom2_element != 'H':
-                        ax.plot([x1, x2], [y1, y2], linewidth=10*atomic_radii['C'], color=cmap(norm(distance)),
-                                zorder=-distance)
-        # 3. Add the colorbar and rest of details to the plot.
+                if self.is_bond_plotted_matrix[atom1_index][atom2_index]:
+                    ax.plot([x1, x2], [y1, y2], linewidth=10 * atomic_radii['C'], color=cmap(norm(distance)), zorder=-1)
+        # 3. Add the color-bar and rest of details to the plot.
         sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
         ticks = [round(a, 3) for a in np.linspace(1.001 * self.min_bond_distance, 0.999 * self.max_bond_distance, 5)]
         cbar = fig.colorbar(sm, ax=ax, shrink=0.7, orientation='horizontal', extend='both', ticks=ticks)
