@@ -6,17 +6,25 @@ Contact: ricardo.ruvalcababriones@kaust.edu.sa
 Version 1 (28/03/23) known bugs:
     - When plotting the bonds between all atoms except H, bonds further away from the real bonding distances are
     detected in metallic atoms. Those bonds are being hidden, but the colorbar is scaled incorrectly.
-This is version 2 (06/04/23). No known bugs.
+Version 2 (06/04/23). No known bugs.
+This is version 3 (04/05/23).
+    - Added capability to read file name from command line input.
+    Known bugs:
+    - Fails to plot structures with more than 162 atoms. More extensive testing and fixing is needed.
 
 Atomic radii and colors taken from xyz2graph program (https://github.com/zotko/xyz2graph).
 
 When executed, the script will ask for all the necessary information.
 To execute, just run on your bash terminal:
-python3 plot_atomic_distances.py
-"""
+python3 plot_atomic_distances.py FILENAME.xyz
 
-import matplotlib.pyplot as plt
+Or the default:
+python3 plot_atomic_distances.py  # ->  will seek for the file "final_positions.xyz",
+                                         otherwise will ask for a correct file name.
+"""
+import sys
 import numpy as np
+import matplotlib.pyplot as plt
 import matplotlib as mpl
 
 bond_constant = 2.2
@@ -166,40 +174,53 @@ class MoleculeGraph:
         self.no_atoms = 0
         self.draw_only_carbon_bonds = False
 
-    def read_xyz_file(self, filename):
-        # Reads an XYZ file, searches for elements and their cartesian coordinates and adds them to corresponding arrays
-        error_message = f'File {filename} was not found in the current folder.'
-        try:
-            with open(filename) as file_in:
-                lines = []
-                for line in file_in:
-                    lines.append(line)
-            lines = [line for line in lines if line != '\n']
-            if filename == 'final_positions.xyz':
+    def find_file(self):
+        # Searches for a file with a given name in the current folder.
+        arguments = sys.argv
+        if len(arguments) > 1:
+            try:
+                filename = sys.argv[1]
+                open(filename)
                 print(f'\nFile {filename} found in the current folder.\nOpening now...')
-            elif filename[-4:] != '.xyz':
-                print(f'\nFile {filename} is not an xyz file.')
-                return self.read_xyz_file(input('Please enter the name of a valid xyz file:\n'))
-            self.no_atoms = int(lines[0])
-            for line in lines[-self.no_atoms:]:
-                line = line.split()
-                self.elements.append(line[0])
-                self.x.append(float(line[1]))
-                self.y.append(float(line[2]))
-                self.z.append(float(line[3]))
-            self.atomic_radii = [atomic_radii[element] for element in self.elements]
-            self.translate_molecules_centroid_to_origin()
-            self.rotate_molecule_towards_z_axis()
-            self.align_molecule_with_x_axis()
-            self.ask_type_of_bonds_drawn()
-            self.calculate_interatomic_distances_and_angles()
-            self.exclude_nonbonding_atoms()
-        except FileNotFoundError:
-            if filename == 'final_positions.xyz':
-                print('\n' + error_message)
-            else:
-                print('\nERROR: ' + error_message)
-            return self.read_xyz_file(input('Please enter the name of a valid xyz file:\n'))
+                if filename[-4:] != '.xyz':
+                    print(f'\nFile {filename} does not have an xyz extension.\nProgram may fail...\n')
+                return filename
+            except FileNotFoundError:
+                print(f'\nERROR: File {filename} was not found in the current folder.')
+                sys.argv[1] = input('Please enter the name of a valid xyz file: ')
+                return self.find_file()
+        else:
+            try:
+                open('final_positions.xyz')
+                print(f'\nFile final_positions.xyz found in the current folder.\nOpening now...')
+                return 'final_positions.xyz'
+            except FileNotFoundError:
+                print(f'\nFile final_positions.xyz was not found in the current folder.')
+                sys.argv.append(input('Please enter the name of your xyz file: '))
+                return self.find_file()
+
+    def read_xyz_file(self):
+        # Reads an XYZ file, searches for elements and their cartesian coordinates and adds them to corresponding arrays
+        filename = self.find_file()
+        with open(filename) as file_in:
+            lines = []
+            for line in file_in:
+                lines.append(line)
+        lines = [line for line in lines if line != '\n']
+        self.no_atoms = int(lines[0])
+        for line in lines[-self.no_atoms:]:
+            line = line.split()
+            self.elements.append(line[0])
+            self.x.append(float(line[1]))
+            self.y.append(float(line[2]))
+            self.z.append(float(line[3]))
+        self.atomic_radii = [atomic_radii[element] for element in self.elements]
+        self.translate_molecules_centroid_to_origin()
+        self.rotate_molecule_towards_z_axis()
+        self.align_molecule_with_x_axis()
+        self.ask_type_of_bonds_drawn()
+        self.calculate_interatomic_distances_and_angles()
+        self.exclude_nonbonding_atoms()
 
     def translate_molecules_centroid_to_origin(self):
         # Name is self-explanatory.
@@ -405,5 +426,5 @@ class MoleculeGraph:
 # Generate the molecule object and call it when the script is run.
 # Default file is "final_positions.xyz". Script will ask for another file if not found.
 molecule = MoleculeGraph()
-molecule.read_xyz_file('final_positions.xyz')
+molecule.read_xyz_file()
 molecule.plot_molecule()
