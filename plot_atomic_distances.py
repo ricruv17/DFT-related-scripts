@@ -413,7 +413,7 @@ class MoleculeGraph:
         sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
         ticks = [round(a, 3) for a in np.linspace(1.001 * self.min_bond_distance, 0.999 * self.max_bond_distance, 5)]
         cbar = fig.colorbar(sm, ax=ax, shrink=0.7, orientation='horizontal', extend='both', ticks=ticks)
-        cbar.set_label(r'Bond lengths ($\AA$)', fontsize=font_size)
+        cbar.set_label(r'Bond length ($\AA$)', fontsize=font_size)
         cbar.ax.tick_params(labelsize=font_size)
         ax.set_aspect('equal')
         ax.axis('off')
