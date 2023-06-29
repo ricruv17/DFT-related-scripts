@@ -1,32 +1,58 @@
 """
-Script that applies a spherical Gaussian filter to molecular orbitals in CUBE file format
-and writes the result into a new CUBE file.
+Script that applies a spherical Gaussian filter to all the CUBE files in the current folder that come from 
+FHI-aims eigenstate calculations, writes the result into new CUBE files, plots them on VMD, and stitches the
+images together.
 
-Written by Ricardo Ruvalcaba at MONA-group in King Abdullah University of Science and Technology (KAUST).
+It only works with files that have standard names output by FHI-aims. Examples:
+aims.out                                    Main output file of the calculation
+cube_001_eigenstate_00117_spin_1.cube       CUBE file containing one Kohn-Sham eigenstate
+
+Written by Ricardo Ruvalcaba and Shadi Fatayer at MONA-group in King Abdullah University of Science and Technology (KAUST).
 Contact: ricardo.ruvalcababriones@kaust.edu.sa
-This is version 1 (01/06/23). No known bugs. Features yet to implement:
+Version 1 (01/06/23). No known bugs. Features yet to implement:
+    - Plot and format final images of the orbitals (most likely on VMD).
+    - Ask user if he wants to plot both the original and the filtered orbitals.
+    - Let user choose surface color.
+    - Rotate and align the molecule.
+    - Print filenames of the images that are being generated one by one.
     - It only supports CUBE files with cubic axis vectors. Add capability to read
     other types of coordinate systems.
-    - Plot and format final images of the orbitals (most likely on VMD).
+This is version 2 (29/06/23). No known bugs. Features yet to implement:
+    - Ask user if he wants to plot both the original and the filtered orbitals.
     - Let user choose surface color.
-    - Print out energies, occupation, etc.
-    - Rotate and align the molecule.
+    - Print filenames of the images that are being generated one by one.
+    - It only supports CUBE files with cubic axis vectors. Add capability to read
+    other types of coordinate systems.
 
 CUBE file reading and writing code adapted from:
 https://gist.github.com/aditya95sriram/8d1fccbb91dae93c4edf31cd6a22510f
 
-When executed, the script will ask for all the necessary information.
+When executed, the script will automatically detect all CUBE files with the correct nomenclature.
 To execute, just run on your bash terminal:
-python3 plot_molecular_orbital_surfaces.py FILENAME.cube
-
-Or the default:
-python3 plot_molecular_orbital_surfaces.py  # ->  the program  will ask for a correct file name.
+python3 plot_molecular_orbital_surfaces.py
 """
-import numpy as np
-from scipy import signal
+from __future__ import print_function
+import argparse
 import sys
+import re
+import subprocess
+import os
+import datetime
+from os import listdir, environ
+from os.path import isfile, join
+from future.utils import iteritems
 
+import numpy as np
+import os
+import scipy
 
+import matplotlib.pyplot as plt
+import numpy as np
+import os
+import PIL
+
+##############################################################################
+"""This part is for the gaussian filtering."""
 class OrbitalSurfaces:
     """Represents a graph of a molecule's particular orbital given in a CUBE file."""
     def __init__(self):
@@ -44,36 +70,11 @@ class OrbitalSurfaces:
         self.x_axis_mesh = None
         self.y_axis_mesh = None
         self.z_axis_mesh = None
+        self.aimsout_list = []
 
-    def find_file(self):
-        """Searches for a file with a given name in the current folder, initially taken
-        from the bash prompt.
-        If the file is not found, the function will ask the user to manually type the location
-        of the file.
-        """
-        arguments = sys.argv
-        # If the user enters a file name in the prompt.
-        if len(arguments) > 1:
-            try:
-                filename = sys.argv[1]
-                open(filename)
-                print(f'\nFile {filename} found in the current folder.\nOpening now...')
-                # Warn the user in case their file does not have the correct extension.
-                if not filename.endswith('cub') or not filename.endswith('cube'):
-                    print(f'\nFile {filename} does not have a CUBE extension.\nProgram may fail...\n')
-                return filename
-            except FileNotFoundError: # In case the file is not found.
-                print(f'\nERROR: File {filename} was not found in the current folder.')
-                sys.argv[1] = input('Please enter the name of a valid CUBE file: ')
-                return self.find_file()
-        # If the user does not enter a file name in the prompt.
-        else:
-            sys.argv.append(input('Please enter the name of your CUBE file: '))
-            return self.find_file()
 
     def read_cube_file(self):
         """Reads a CUBE file and stores its info in the object."""
-        self.filename = self.find_file() # Gets the name of the desired file.
         # Begin reading of the CUBE file.
         with open(self.filename) as file_in:
             # Ignore comments.
@@ -117,6 +118,7 @@ class OrbitalSurfaces:
         mesh = np.mgrid[r0[0]:rf[0]:complex(0, self.no_voxels[0]), r0[1]:rf[1]:complex(0, self.no_voxels[1]), r0[2]:rf[2]:complex(0, self.no_voxels[2])]
         self.x_axis_mesh, self.y_axis_mesh, self.z_axis_mesh = mesh
 
+
     def write_cube_file(self, filename):
         """Writes the information of the object into a CUBE file with the correct formatting.
         
@@ -137,9 +139,9 @@ class OrbitalSurfaces:
             for i in range(new_no_voxels[0]):
                 for j in range(new_no_voxels[1]):
                     for k in range(new_no_voxels[2]):
-                        if (i or j or k) and k%6==0:
+                        if (i or j or k) and (k % 6 == 0):
                             file_out.write("\n")
-                        file_out.write(" {0: .5E}".format(self.volume_data[i,j,k]))
+                        file_out.write(" {0: .5E}".format(self.volume_data[i, j, k]))
 
 
     def apply_gaussian_filter(self, sigma=1):
@@ -148,13 +150,623 @@ class OrbitalSurfaces:
         Parameters:
             sigma: standard deviation of the normal distribution.
         """
-        kernel = 1/sigma * np.exp(-(self.x_axis_mesh**2 + self.y_axis_mesh**2 + self.z_axis_mesh**2) / (2*sigma**2))
-        self.volume_data = signal.convolve(self.volume_data, kernel, mode='same')
+        # Define the gaussian kernel in reciprocal space.
+        shape = (self.no_voxels[0], self.no_voxels[1], self.no_voxels[2])
+        center = (shape[0] // 2, shape[1] // 2, shape[2] // 2)
+        r = np.ones(shape)
+        for i in range(-center[0], center[0]):
+            for j in range(-center[1], center[1]):
+                for k in range(-center[2], center[2]):
+                    u = i / shape[0]
+                    v = j / shape[1]
+                    w = k / shape[2]
+                    r[i][j][k] = np.sqrt( u**2 + v**2 + w**2)
+        kernel = np.exp(- 2 * (np.pi * sigma * r)**2)
+        # Multiply by the kernel in reciprocal space and go back to real space.
+        volume_data_fft = scipy.fftpack.fftn(self.volume_data)
+        self.volume_data = scipy.fftpack.ifftn(volume_data_fft * kernel).real
 
 
-molecule = OrbitalSurfaces()
-molecule.read_cube_file()
-# This value for sigma reproduced correctly the results from the article
-# https://doi.org/10.1002/ange.202009200
-molecule.apply_gaussian_filter(sigma=2)
-molecule.write_cube_file(f'smoothened_{molecule.filename}')
+    @staticmethod
+    def find_eigenstate_cube_files():
+        """ Returns the names of all the CUBE files in the current folder in a list. """
+        cube_files = []
+        for filename in os.listdir():
+            if filename.startswith('cube')\
+                and filename.find('eigenstate') != -1\
+                    and filename.endswith('cube') or filename.endswith('cub'):
+                cube_files.append(filename)
+        return cube_files
+
+
+    def find_which_orbitals_were_calculated(self):
+        """ Returns a list with the numbers of the orbitals that were plotted in 
+         CUBE files. """
+        files = self.find_eigenstate_cube_files()
+        calculated_orbitals = {1: [],
+                               2: []}
+        for filename in files:
+            spin = int(filename[31])
+            orbital_number = int(filename[20:25])
+            calculated_orbitals[spin].append(orbital_number)
+        calculated_orbitals[1].sort()
+        calculated_orbitals[2].sort()
+        return calculated_orbitals
+
+
+    def print_orbital_data(self):
+        """ Prints the state number, occupation, and energy from the aims.out file. """
+        # 1. Store the aim.out file in a list for further processing.
+        filename = 'aims.out'
+        with open(filename) as file_in:
+            for line in file_in:
+                self.aimsout_list.append(line)
+                # 2. Find the numner of KS states in the calculation.
+                if 'Number of Kohn-Sham states (occupied + empty):' in line:
+                    no_of_KS_states = line.split()
+                    no_of_KS_states = int(no_of_KS_states[-1])
+        # 3. Determine the position of the final KS states.
+        self.aimsout_list.reverse()
+        eigenvalues_index = len(self.aimsout_list) - self.aimsout_list.index('  Writing Kohn-Sham eigenvalues.\n') - 1
+        self.aimsout_list.reverse()
+        # 4. Print to terminal.
+        calculated_orbitals = self.find_which_orbitals_were_calculated()
+        print('\n  The eigenvalues that were calculated are:')
+        calculation_is_spin_polarized = bool(calculated_orbitals[2])
+        if not calculation_is_spin_polarized: # print for closed-shell calculations
+            print('  State    Occupation    Eigenvalue [Ha]    Eigenvalue [eV]')
+            initial_orbital = eigenvalues_index + 3 + calculated_orbitals[1][0] - 1
+            final_orbital = eigenvalues_index + 3 + calculated_orbitals[1][-1]
+            for line in self.aimsout_list[initial_orbital: final_orbital]:
+                print(line[:-1])
+        else: # print for open-shell calculations
+            print('  State    Occupation    Eigenvalue [Ha]    Eigenvalue [eV]')
+            print('  Spin-up eigenvalues')
+            line_lower_limit = eigenvalues_index + 5 + calculated_orbitals[1][0] - 1
+            line_upper_limit = eigenvalues_index + 5 + calculated_orbitals[1][-1]
+            for line in self.aimsout_list[line_lower_limit: line_upper_limit]:
+                print(line[:-1])
+            print('  Spin-down eigenvalues')
+            line_lower_limit = eigenvalues_index + 5 + no_of_KS_states + 4 + calculated_orbitals[2][0] - 1
+            line_upper_limit = eigenvalues_index + 5 + no_of_KS_states + 4 + calculated_orbitals[2][-1]
+            for line in self.aimsout_list[line_lower_limit: line_upper_limit]:
+                print(line[:-1])
+
+
+    def get_angles_to_rotate_molecule_towards_z_axis(self):
+        """Calculates the angles that will rotate the molecule towards the z axis."""
+        # 0. Find plane that fits best all the atoms in the molecule.
+        min_squares_matrix = np.array([self.atoms_x_coordinate, self.atoms_y_coordinate]).T
+        n = np.dot(np.matmul(np.linalg.inv(np.matmul(min_squares_matrix.T, min_squares_matrix)), min_squares_matrix.T),
+                   np.array(self.atoms_z_coordinate))
+        nz = (n[0]**2 + n[1]**2 + 1)**-0.5
+        nx = -n[0] * nz
+        ny = -n[1] * nz
+        ux, uy, uz = np.cross([nx, ny, nz], [0, 0, 1])
+        theta = np.arccos(nz)
+        row1 = [np.cos(theta) + ux ** 2 * (1 - np.cos(theta)),
+                ux * uy * (1 - np.cos(theta)) - uz * np.sin(theta),
+                ux * uz * (1 - np.cos(theta)) + uy * np.sin(theta)]
+        row2 = [uy * ux * (1 - np.cos(theta)) + uz * np.sin(theta),
+                np.cos(theta) + uy ** 2 * (1 - np.cos(theta)),
+                uy * uz * (1 - np.cos(theta)) - ux * np.sin(theta)]
+        row3 = [uz * ux * (1 - np.cos(theta)) - uy * np.sin(theta),
+                uz * uy * (1 - np.cos(theta)) + ux * np.sin(theta),
+                np.cos(theta) + uz ** 2 * (1 - np.cos(theta))]
+        matrix = np.array([row1, row2, row3])
+
+        sy = np.sqrt(matrix[0, 0]**2 + matrix[1, 0]**2)
+        if sy < 1e-6:
+            # Singular case: sy is close to zero
+            # This corresponds to a rotation about the y-axis by -90 degrees
+            # We can set the other Euler angles to zero in this case
+            theta_x = np.arctan2(-matrix[2, 1], matrix[2, 2])
+            theta_y = -np.pi/2
+            theta_z = 0
+        else:
+            theta_x = np.arctan2(matrix[2, 1], matrix[2, 2])
+            theta_y = np.arctan2(-matrix[2, 0], sy)
+            theta_z = np.arctan2(matrix[1, 0], matrix[0, 0])
+        return np.array((theta_x, theta_y, theta_z))*180/np.pi
+
+
+# Generate the new filtered CUBE file
+files = OrbitalSurfaces.find_eigenstate_cube_files()
+print(f'\n{len(files)} raw CUBE files found in the current folder.\nApplying gaussian filter...\n')
+file_no = 1
+for file in files:
+    orbital = OrbitalSurfaces()
+    orbital.filename = file
+    print(f'File {orbital.filename} ({file_no} out of {len(files)}) being filtered. Please stand by...')
+    orbital.read_cube_file()
+    orbital.apply_gaussian_filter(sigma=6)
+    orbital.write_cube_file(f'filtered_{orbital.filename}')
+    file_no += 1
+isovalue = 5e-5
+euler_angles = orbital.get_angles_to_rotate_molecule_towards_z_axis()
+
+##############################################################################
+"""This part is for the plotting of the isosurfaces using VMD."""
+
+vmd_cube_help = """vmd_cube is a script to render cube files with vmd.
+To generate cube files with Psi4 add the command cubeprop() at the end of your input file."""
+
+vmd_exe = ""
+
+vmd_script_name = ".vmd_mo_script.vmd"
+
+vmd_template = """#
+# VMD script to plot MOs from cube files
+#
+
+# Load the molecule and change the atom style
+mol load cube PARAM_CUBEFILE.cube
+mol modcolor 0 PARAM_CUBENUM Element
+mol modstyle 0 PARAM_CUBENUM Licorice 0.110000 10.000000 10.000000
+#mol modstyle 0 PARAM_CUBENUM CPK 0.400000 0.40000 30.000000 16.000000
+
+# Define the material
+material change ambient Opaque 0.310000
+material change diffuse Opaque 0.720000
+material change specular Opaque 0.500000
+material change shininess Opaque 0.480000
+material change opacity Opaque 1.000000
+material change outline Opaque 0.000000
+material change outlinewidth Opaque 0.000000
+material change transmode Opaque 0.000000
+material change specular Opaque 0.750000
+
+material change ambient   EdgyShiny 0.310000
+material change diffuse   EdgyShiny 0.720000
+material change shininess EdgyShiny 1.0000
+material change opacity   EdgyShiny PARAM_OPACITY
+
+# Customize atom colors
+color Element C silver
+color Element H white
+
+# Rotate and translate the molecule
+rotate x by PARAM_RX
+rotate y by PARAM_RY
+rotate z by PARAM_RZ
+translate by PARAM_TX PARAM_TY PARAM_TZ
+scale by PARAM_SCALE
+
+# Eliminate the axis and perfect the view
+axes location Off
+display projection Orthographic
+display depthcue off
+display resize PARAM_IMAGEW PARAM_IMAGEH
+color Display Background white"""
+
+
+vmd_template_surface = """#
+# Add a surface
+mol color ColorID PARAM_ISOCOLOR
+mol representation Isosurface PARAM_ISOVALUE 0 0 0 1 1
+mol selection all
+mol material EdgyShiny
+mol addrep PARAM_CUBENUM
+"""
+
+vmd_template_interactive = """#
+# Disable rendering
+mol off PARAM_CUBENUM
+"""
+
+vmd_template_render = """
+# Render
+render TachyonInternal PARAM_CUBEFILE.tga
+mol delete PARAM_CUBENUM
+"""
+
+vmd_template_rotate = """
+light 1 off
+light 0 rot y  30.0
+light 0 rot x -30.0
+"""
+
+default_path = os.getcwd()
+
+# Default parameters
+options = {"ISOVALUE"     : [None,"Isosurface Value(s)"],
+           "ISOCOLOR"     : [None,"Isosurface Color(s)"],
+           "ISOCUT"       : [None,"Isosurface Value Cutoff"],
+           "RX"           : [None,"X-axis Rotation"],
+           "RY"           : [None,"Y-axis Rotation"],
+           "RZ"           : [None,"Z-axis Rotation"],
+           "TX"           : [None,"X-axis Translation"],
+           "TY"           : [None,"Y-axis Translation"],
+           "TZ"           : [None,"Z-axis Translation"],
+           "OPACITY"      : [None,"Opacity"],
+           "CUBEDIR"      : [None,"Cubefile Directory"],
+           "SCALE"        : [None,"Scaling Factor"],
+           "MONTAGE"      : [None,"Montage"],
+           "LABEL_MOS"    : [None,"Label MOs"],
+           "FONTSIZE"     : [None,"Font size"],
+           "IMAGEW"       : [None,"Image width"],
+           "IMAGEH"       : [None,"Image height"],
+           "VMDPATH"      : [None,"VMD Path"],
+           "INTERACTIVE"  : [None,"Interactive Mode"],
+           "GZIP"         : [None,"Gzip Cube Files"]}
+
+
+def which(program):
+    import os
+    def is_exe(fpath):
+        return os.path.isfile(fpath) and os.access(fpath, os.X_OK)
+
+    fpath, fname = os.path.split(program)
+    if fpath:
+        if is_exe(program):
+            return program
+    else:
+        for path in os.environ["PATH"].split(os.pathsep):
+            path = path.strip('"')
+            exe_file = os.path.join(path, program)
+            if is_exe(exe_file):
+                return exe_file
+
+    return None
+
+
+def multigsub(subs,str):
+    for k,v in subs.items():
+        str = re.sub(k,v,str)
+    return str
+
+environ['VMDPATH'] = '/mnt/c/Program Files \(x86\)/University of Illinois/VMD/vmd.exe'
+# environ['VMDPATH'] = '/usr/local/bin/vmd' # for my previous laptop
+def find_vmd(options):
+    if environ['VMDPATH']:
+        vmdpath = environ['VMDPATH']
+        vmdpath = multigsub({" " : r"\ "},vmdpath)
+        options["VMDPATH"][0] = vmdpath
+    else:
+        print("Please set the VMDPATH environmental variable to the path of VMD.")
+        exit(1)
+
+
+def save_setup_command(argv):
+    file_name = join(default_path, '.vmd_cube_command')
+    f = open(file_name, 'w')
+    f.write('# setup command was executed '+datetime.datetime.now().strftime("%d-%B-%Y %H:%M:%S"+"\n"))
+    f.write(" ".join(argv[:])+"\n")
+    f.close()
+
+
+def read_options(options):
+    parser = argparse.ArgumentParser(description=vmd_cube_help)
+    parser.add_argument('data', metavar='<cubefile dir>', type=str, nargs='?',default=".",
+                   help='The directory containing the cube files.')
+                   
+    parser.add_argument('--isovalue', metavar='<isovalue>', type=float, nargs='*',default=[isovalue,-isovalue],
+                   help='a list of isosurface values (a list of floats, default = [0.05,-0.05])')
+    parser.add_argument('--isocolor', metavar='<integer>', type=int, nargs='*',default=[3,23],
+                   help='a list of isosurface color IDs (a list of integers, default = [3,23])')
+    parser.add_argument('--isocut', metavar='<isovalue cutoff>', type=float, nargs='?',default=1.0e-5,
+                   help='cutoff value for rendering an isosurface (float, default = 1.0e-5)')
+                   
+    parser.add_argument('--rx', metavar='<angle>', type=float, nargs='?', default=euler_angles[0],
+                   help='the x-axis rotation angle (float, default = 30.0)')
+    parser.add_argument('--ry', metavar='<angle>', type=float, nargs='?', default=euler_angles[1],
+                   help='the y-axis rotation angle (float, default = 40.0)')
+    parser.add_argument('--rz', metavar='<angle>', type=float, nargs='?', default=euler_angles[2],
+                   help='the z-axis rotation angle (float, default = 15.0)')
+
+
+    parser.add_argument('--tx', metavar='<length>', type=float, nargs='?',default=0.0,
+                   help='the x-axis translation (float, default = 0.0)')
+    parser.add_argument('--ty', metavar='<length>', type=float, nargs='?',default=0.0,
+                   help='the y-axis translation (float, default = 0.0)')
+    parser.add_argument('--tz', metavar='<length>', type=float, nargs='?',default=0.0,
+                   help='the z-axis translation (float, default = 0.0)')
+
+    parser.add_argument('--opacity', metavar='<opacity>', type=float, nargs='?',default=1.0,
+                   help='opacity of the isosurface (float, default = 1.0)')
+
+    parser.add_argument('--scale', metavar='<factor>', type=float, nargs='?',default=1.0,
+                   help='the scaling factor (float, default = 1.0)')
+    parser.add_argument('--no-montage', action="store_true",
+                   help='call montage to combine images. (string, default = false)')
+    parser.add_argument('--no-labels', action="store_true",
+                   help='do not add labels to images. (string, default = false)')
+
+    parser.add_argument('--imagew', metavar='<integer>', type=int, nargs='?',default=1024,
+                   help='the width of images (integer, default = 250)')
+    parser.add_argument('--imageh', metavar='<integer>', type=int, nargs='?',default=1024,
+                   help='the height of images (integer, default = 250)')
+    parser.add_argument('--fontsize', metavar='<integer>', type=int, nargs='?',default=20,
+                   help='the font size (integer, default = 20)')
+
+    parser.add_argument('--interactive', action="store_true",
+                   help='run in interactive mode (default = false)')
+
+    parser.add_argument('--gzip', action="store_true",
+                   help='gzip cube files (default = false)')
+
+    parser.add_argument('--national_scheme', action="store_true",
+                   help='use a red/blue color scheme. (string, default = false)')
+    parser.add_argument('--silver_scheme', action="store_true",
+                   help='use a gray/white color scheme. (string, default = false)')
+    parser.add_argument('--bright_scheme', action="store_true",
+                   help='use a soft yellow/blue color scheme. (string, default = false)')
+    parser.add_argument('--electron_scheme', action="store_true",
+                   help='use a purple/green color scheme. (string, default = false)')
+
+    args = parser.parse_args()
+
+    options["CUBEDIR"][0] = str(args.data)
+    options["ISOVALUE"][0] = args.isovalue
+    options["ISOCOLOR"][0] = args.isocolor
+    options["ISOCUT"][0] = str(args.isocut)
+    options["RX"][0] = str(args.rx)
+    options["RY"][0] = str(args.ry)
+    options["RZ"][0] = str(args.rz)
+    options["TX"][0] = str(args.tx)
+    options["TY"][0] = str(args.ty)
+    options["TZ"][0] = str(args.tz)
+    options["OPACITY"][0] = str(args.opacity)
+    options["SCALE"][0] = str(args.scale)
+    options["LABEL_MOS"][0] = str(not args.no_labels)
+    options["MONTAGE"][0] = str(not args.no_montage)
+    options["FONTSIZE"][0] = str(args.fontsize)
+    options["IMAGEW"][0] = str(args.imagew)
+    options["IMAGEH"][0] = str(args.imageh)
+    options["INTERACTIVE"][0] = str(args.interactive)
+    options["GZIP"][0] = str(args.gzip)
+
+    if args.national_scheme:
+        options["ISOCOLOR"][0] = [23,30]
+
+    if args.silver_scheme:
+        options["ISOCOLOR"][0] = [24,32]  # silver = [2,8]
+
+    if args.electron_scheme:
+        options["ISOCOLOR"][0] = [13,12]
+
+    if args.bright_scheme:
+        options["ISOCOLOR"][0] = [32,22]
+
+    print("\nParameters:")
+    sorted_parameters = sorted(options.keys())
+    for k in sorted_parameters:
+        print("  %-20s %s" % (options[k][1],str(options[k][0])))
+
+def find_cubes(options):
+    # Find all the cube files in a given directory
+    dir = options["CUBEDIR"][0]
+    sorted_files = []
+    zipped_files = []
+
+    for f in listdir(options["CUBEDIR"][0]):
+        if "\'" in f:
+            nf = f.replace("\'", "p")
+            os.rename(f,nf)
+            f = nf
+        if "\"" in f:
+            nf = f.replace("\"", "pp")
+            os.rename(f,nf)
+            f = nf
+        if f[-5:] == '.cube':
+            sorted_files.append(f)
+        elif f[-8:] == '.cube.gz':
+            found_zipped = True
+            # unzip file
+            sorted_files.append(f[:-3])
+            zipped_files.append(f)
+
+    if len(zipped_files) > 0:
+        print("\nDecompressing gzipped cube files")
+        FNULL = open(os.devnull, 'w')
+        subprocess.call(("gzip -d %s" % " ".join(zipped_files)),stdout=FNULL, shell=True)
+        options["GZIP"][0] = 'True'
+
+    return sorted(sorted_files)
+
+
+def write_and_run_vmd_script(options,cube_files):
+    vmd_script = open(vmd_script_name,"w+")
+    vmd_script.write(vmd_template_rotate)
+
+    # Define a map that contains all the values of the VMD parameters
+    replacement_map = {}
+    for (k, v) in iteritems(options):
+        key = "PARAM_" + k.upper()
+        replacement_map[key] = v[0]
+
+    for n,f in enumerate(cube_files):
+        replacement_map["PARAM_CUBENUM"] = '%03d' % n
+        replacement_map["PARAM_CUBEFILE"] = options["CUBEDIR"][0] + '/' + f[:-5]
+
+        # Default isocontour values or user-provided
+        isovalue = options["ISOVALUE"][0][:]
+        isocolor = options["ISOCOLOR"][0][:]
+        
+        # Read isocontour values from file, if available
+        with open(f,'r') as file:
+            l1 = file.readline()
+            l2 = file.readline()
+            m = re.search(r'density: \(([-+]?[0-9]*\.?[0-9]+)\,([-+]?[0-9]*\.?[0-9]+)\)',l2)
+            if m:
+                isovalue[0] = float(m.groups()[0])
+                isovalue[1] = float(m.groups()[1])
+
+        nisovalue = len(isovalue)
+        nisocolor = len(isocolor)
+        if nisovalue!= nisocolor:
+            print("Quitting: Please specify the same number of isosurface values and colors.")
+            quit()
+        else:
+            print("Plotting %s with isosurface values" % (f), str(isovalue))
+
+        vmd_script_surface = ""
+        surf = zip(isovalue,isocolor)
+        for c in surf:
+            if abs(c[0]) > float(options["ISOCUT"][0]):
+                replacement_map["PARAM_ISOVALUE"] = str(c[0])
+                replacement_map["PARAM_ISOCOLOR"] = str(c[1])
+                vmd_script_surface += multigsub(replacement_map,vmd_template_surface)
+            else:
+                print(" * Skipping isosurface with isocontour value %f" % c[0])
+        vmd_script_head = multigsub(replacement_map,vmd_template)
+        
+        if options["INTERACTIVE"][0] == 'True':
+            vmd_script_render = multigsub(replacement_map,vmd_template_interactive)
+        else:
+            vmd_script_render = multigsub(replacement_map,vmd_template_render)
+
+        vmd_script.write(vmd_script_head + "\n" + vmd_script_surface + "\n" + vmd_script_render)
+
+    if options["INTERACTIVE"][0] == 'False':
+        vmd_script.write("quit")
+        vmd_script.close()
+        # Call VMD in text mode
+        FNULL = open(os.devnull, 'w')
+        subprocess.call(("%s -dispdev text -e %s" % (options["VMDPATH"][0],vmd_script_name)),stdout=FNULL, shell=True)
+    else:
+        vmd_script.close()
+        # Call VMD in graphic mode
+        FNULL = open(os.devnull, 'w')
+        subprocess.call(("%s -e %s" % (options["VMDPATH"][0],vmd_script_name)),stdout=FNULL, shell=True)
+
+
+def call_montage(options,cube_files):
+    if options["MONTAGE"][0] == 'True':
+        # Optionally, combine all figures into one image using montage
+        montage_exe = which("montage")
+        if montage_exe:
+            alpha_mos = []
+            beta_mos = []
+            densities = []
+            basis_functions = []
+            for f in cube_files:
+                tga_file = f[:-5] + ".tga"
+                if "Psi_a" in f:
+                    alpha_mos.append(tga_file)
+                if "Psi_b" in f:
+                    beta_mos.append(tga_file)
+                if "D" in f:
+                    densities.append(tga_file)
+                if "Phi" in f:
+                    basis_functions.append(tga_file)
+
+            # Sort the MOs
+            sorted_mos = []
+            for set in [alpha_mos,beta_mos]:
+                sorted_set = []
+                for s in set:
+                    s_split = s.split('_')
+                    sorted_set.append((int(s_split[2]),"Psi_a_%s_%s" % (s_split[2],s_split[3])))
+                sorted_set = sorted(sorted_set)
+                sorted_mos.append([s[1] for s in sorted_set])
+           
+            os.chdir(options["CUBEDIR"][0])
+                    
+            # Add labels
+            if options["LABEL_MOS"][0] == 'True':
+                for f in sorted_mos[0]:
+                    f_split = f.split('_')
+                    label = '%s\ \(%s\)' % (f_split[3][:-4],f_split[2])
+                    subprocess.call(("montage -pointsize %s -label %s %s -geometry '%sx%s+0+0>' %s" %
+                        (options["FONTSIZE"][0],label,f,options["IMAGEW"][0],options["IMAGEH"][0],f)), shell=True)
+
+            # Combine together in one image
+            if len(alpha_mos) > 0:
+                subprocess.call(("%s %s -geometry +2+2 AlphaMOs.tga" % (montage_exe," ".join(sorted_mos[0]))), shell=True)
+            if len(beta_mos) > 0:
+                subprocess.call(("%s %s -geometry +2+2 BetaMOs.tga" % (montage_exe," ".join(sorted_mos[1]))), shell=True)
+            if len(densities) > 0:
+                subprocess.call(("%s %s -geometry +2+2 Densities.tga" % (montage_exe," ".join(densities))), shell=True)
+            if len(basis_functions) > 0:
+                subprocess.call(("%s %s -geometry +2+2 BasisFunctions.tga" % (montage_exe," ".join(basis_functions))), shell=True)
+
+
+def zip_files(cube_files,options):
+    """Gzip cube files if requested or necessary."""
+    if options["GZIP"][0] == 'True':
+        print("\nCompressing cube files")
+        FNULL = open(os.devnull, 'w')
+        subprocess.call(("gzip %s" % " ".join(cube_files)),stdout=FNULL, shell=True)
+
+
+def get_cumulative_density_iso_value(file,sigma):
+    """Find the isosurface values that capture a certain amount of the total density (sigma)."""
+    cube_data = []
+    norm = 0.0
+    k = 0
+    with open(file) as f:
+        for line in f:
+            if k > 6:
+                for s in line.split():
+                    value = float(s)
+                    value_sqr = value * value
+                    norm = norm + value_sqr
+                    cube_data.append((value_sqr,value))
+            k = k + 1
+
+    cube_data.sort(reverse=True)
+
+    sum = 0.0
+    positive_iso = 0.0
+    negative_iso = 0.0
+    for (value_sqr,value) in cube_data:
+        if sum < sigma:
+            sum = sum + value_sqr / norm
+            if value > 0:
+                positive_iso = value
+            else:
+                negative_iso = value
+        else:
+            return (positive_iso, negative_iso)
+    return (positive_iso, negative_iso)
+
+
+def main(argv):
+    find_vmd(options)
+    read_options(options)
+    save_setup_command(argv)
+    cube_files = find_cubes(options)
+    write_and_run_vmd_script(options,cube_files)
+    call_montage(options,cube_files)
+    zip_files(cube_files,options)
+
+if __name__ == '__main__':
+    main(sys.argv)
+
+os.remove('.vmd_cube_command')
+os.remove('.vmd_mo_script.vmd')
+
+##############################################################################
+""" This part is for stitching together the generated images. """
+
+# only plots files with the .tga extension
+fileList = [ ] 
+for file in os.listdir():
+    if file.endswith("1.tga"):
+        f = os.path.join("", file)
+        # only adds to the list if "spin" is in the str - 
+        # could be used to plot a certain spin
+        # or to ignore other cube files
+        if "spin" in f:  
+            fileList.append(os.path.join("", file))
+
+columns = 1
+plt.figure(figsize=(16,3*len(fileList)))
+for num, x in enumerate(fileList):
+    plt.subplot(len(fileList),columns,num+1)
+    img = PIL.Image.open(x)
+    title = x.split('_')[3]  #separates file name per _ and only takes the important part
+    newtitle = title.replace("000","") # removes the 000 from the file name
+    #plt.title(newtitle)
+    plt.text(970,450,newtitle, fontsize = 100)
+    plt.ylim(200,800)
+    plt.xlim(0,900)
+    plt.axis('off')
+    plt.subplots_adjust(left = 0.1)
+    plt.imshow(img)
+    plt.tight_layout()
+    plt.savefig('orbitals_spin1.png')
+
+
+orbital.print_orbital_data()
