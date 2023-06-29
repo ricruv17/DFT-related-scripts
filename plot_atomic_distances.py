@@ -19,7 +19,7 @@ To execute, just run on your bash terminal:
 python3 plot_atomic_distances.py FILENAME.xyz
 
 Or the default:
-python3 plot_atomic_distances.py  # ->  will seek for the file "final_positions.xyz",
+python3 plot_atomic_distances.py  # ->  will seek for the file "geometry.out.xyz",
                                          otherwise will ask for a correct file name.
 """
 import sys
@@ -191,11 +191,11 @@ class MoleculeGraph:
                 return self.find_file()
         else:
             try:
-                open('final_positions.xyz')
-                print(f'\nFile final_positions.xyz found in the current folder.\nOpening now...')
-                return 'final_positions.xyz'
+                open('geometry.out.xyz')
+                print(f'\nFile geometry.out.xyz found in the current folder.\nOpening now...')
+                return 'geometry.out.xyz'
             except FileNotFoundError:
-                print(f'\nFile final_positions.xyz was not found in the current folder.')
+                print(f'\nFile geometry.out.xyz was not found in the current folder.')
                 sys.argv.append(input('Please enter the name of your xyz file: '))
                 return self.find_file()
 
@@ -424,7 +424,7 @@ class MoleculeGraph:
 
 
 # Generate the molecule object and call it when the script is run.
-# Default file is "final_positions.xyz". Script will ask for another file if not found.
+# Default file is "geometry.out.xyz". Script will ask for another file if not found.
 molecule = MoleculeGraph()
 molecule.read_xyz_file()
 molecule.plot_molecule()
