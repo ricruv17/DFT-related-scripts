@@ -242,6 +242,7 @@ class OrbitalSurfaces:
         nz = (n[0]**2 + n[1]**2 + 1)**-0.5
         nx = -n[0] * nz
         ny = -n[1] * nz
+        print(nx, ny, nz)
         ux, uy, uz = np.cross([nx, ny, nz], [0, 0, 1])
         theta = np.arccos(nz)
         row1 = [np.cos(theta) + ux ** 2 * (1 - np.cos(theta)),
@@ -271,13 +272,13 @@ class OrbitalSurfaces:
 
 
 # Generate the new filtered CUBE file
-files = OrbitalSurfaces.find_eigenstate_cube_files()
-print(f'\n{len(files)} raw CUBE files found in the current folder.\nApplying gaussian filter...\n')
+raw_CUBE_files = OrbitalSurfaces.find_eigenstate_cube_files()
+print(f'\n{len(raw_CUBE_files)} raw CUBE files found in the current folder.\nApplying gaussian filter...\n')
 file_no = 1
-for file in files:
+for file in raw_CUBE_files:
     orbital = OrbitalSurfaces()
     orbital.filename = file
-    print(f'File {orbital.filename} ({file_no} out of {len(files)}) being filtered. Please stand by...')
+    print(f'File {orbital.filename} ({file_no} out of {len(raw_CUBE_files)}) being filtered. Please stand by...')
     orbital.read_cube_file()
     orbital.apply_gaussian_filter(sigma=6)
     orbital.write_cube_file(f'filtered_{orbital.filename}')
@@ -740,33 +741,33 @@ os.remove('.vmd_mo_script.vmd')
 ##############################################################################
 """ This part is for stitching together the generated images. """
 
-# only plots files with the .tga extension
-fileList = [ ] 
-for file in os.listdir():
-    if file.endswith("1.tga"):
-        f = os.path.join("", file)
-        # only adds to the list if "spin" is in the str - 
-        # could be used to plot a certain spin
-        # or to ignore other cube files
-        if "spin" in f:  
-            fileList.append(os.path.join("", file))
+def stitch_images_together(filenames, spin):
+    plt.figure(figsize=(8, 3*len(filenames)))
+    for num, file in enumerate(filenames):
+        plt.subplot(len(filenames), 1, num + 1)
+        img = PIL.Image.open(file)
+        if file.startswith('filtered'):
+            subfigure_name = ""
+        else:
+            subfigure_name = file.split('_')[3]
+            subfigure_name = str(int(subfigure_name)) # Removes the zeros from the subfigure name.
+        plt.text(970, 450, subfigure_name, fontsize=100)
+        plt.xlim(0, 1000) # The limits are 0 and 1000.
+        plt.ylim(0, 1000) # The limits are 0 and 1000.
+        plt.axis('off')
+        plt.subplots_adjust(left=0.1)
+        plt.imshow(img)
+        plt.tight_layout()
+        plt.savefig(f'orbitals_{spin}.png')
 
-columns = 1
-plt.figure(figsize=(16,3*len(fileList)))
-for num, x in enumerate(fileList):
-    plt.subplot(len(fileList),columns,num+1)
-    img = PIL.Image.open(x)
-    title = x.split('_')[3]  #separates file name per _ and only takes the important part
-    newtitle = title.replace("000","") # removes the 000 from the file name
-    #plt.title(newtitle)
-    plt.text(970,450,newtitle, fontsize = 100)
-    plt.ylim(200,800)
-    plt.xlim(0,900)
-    plt.axis('off')
-    plt.subplots_adjust(left = 0.1)
-    plt.imshow(img)
-    plt.tight_layout()
-    plt.savefig('orbitals_spin1.png')
-
+filenames = {}
+for spin in ['spin_1', 'spin_2']:
+    filenames[spin] = []
+    for file in raw_CUBE_files:
+        if (file.find(spin) != -1):
+            filenames[spin].append(file.replace('.cube', '.tga'))
+            filenames[spin].append(f"filtered_{file.replace('.cube', '.tga')}")
+    if bool(spin):
+        stitch_images_together(filenames[spin], spin)
 
 orbital.print_orbital_data()
