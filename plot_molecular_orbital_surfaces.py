@@ -17,7 +17,7 @@ Version 1 (01/06/23). No known bugs. Features yet to implement:
     - Print filenames of the images that are being generated one by one.
     - It only supports CUBE files with cubic axis vectors. Add capability to read
     other types of coordinate systems.
-This is version 2 (29/06/23). No known bugs. Features yet to implement:
+This is version 2 (30/06/23). No known bugs. Features yet to implement:
     - Ask user if he wants to plot both the original and the filtered orbitals.
     - Let user choose surface color.
     - Print filenames of the images that are being generated one by one.
@@ -242,7 +242,6 @@ class OrbitalSurfaces:
         nz = (n[0]**2 + n[1]**2 + 1)**-0.5
         nx = -n[0] * nz
         ny = -n[1] * nz
-        print(nx, ny, nz)
         ux, uy, uz = np.cross([nx, ny, nz], [0, 0, 1])
         theta = np.arccos(nz)
         row1 = [np.cos(theta) + ux ** 2 * (1 - np.cos(theta)),
