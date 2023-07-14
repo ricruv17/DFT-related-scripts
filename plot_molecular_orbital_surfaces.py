@@ -21,8 +21,10 @@ This is version 2 (30/06/23). No known bugs. Features yet to implement:
     - Ask user if he wants to plot both the original and the filtered orbitals.
     - Let user choose surface color.
     - Print filenames of the images that are being generated one by one.
-    - It only supports CUBE files with cubic axis vectors. Add capability to read
-    other types of coordinate systems.
+    - Make the program faster.
+    - Reduce Shininess of the surfaces
+    - Orient the molecule along the x-axis
+    - Make VDM accept all isovalues greater than 1e-6
 
 CUBE file reading and writing code adapted from:
 https://gist.github.com/aditya95sriram/8d1fccbb91dae93c4edf31cd6a22510f
@@ -53,6 +55,8 @@ import PIL
 
 ##############################################################################
 """This part is for the gaussian filtering."""
+
+RESOLUTION = 2048 # 2048 is the maximum
 class OrbitalSurfaces:
     """Represents a graph of a molecule's particular orbital given in a CUBE file."""
     def __init__(self):
@@ -71,6 +75,26 @@ class OrbitalSurfaces:
         self.y_axis_mesh = None
         self.z_axis_mesh = None
         self.aimsout_list = []
+        self.arguments = sys.argv.copy()
+
+
+    def get_sigma_and_isovalues(self):
+        """ Forces the user to give correct values for gaussian sigma and surface isovalue. """
+        try:
+            sigma = float(self.arguments[1])
+            isovalue = float(self.arguments[2])
+            print(f'\nThe orbitals will be processed with sigma = {sigma}, isovalue = {isovalue}.')
+            return sigma, isovalue
+        except IndexError:
+            print(f'\nYou did not specify the sigma nor the isovalue.')
+            self.arguments.append(input('Please enter the value for sigma: '))
+            self.arguments.append(input('Please enter the isovalue: '))
+            return self.get_sigma_and_isovalues()
+        except ValueError or TypeError:
+            print(f'\nERROR: sigma and the isovalue must be real numbers.')
+            self.arguments[1] = input('Please enter a correct value for sigma: ')
+            self.arguments[2] = input('Please enter a correct isovalue: ')
+            return self.get_sigma_and_isovalues()
 
 
     def read_cube_file(self):
@@ -141,7 +165,7 @@ class OrbitalSurfaces:
                     for k in range(new_no_voxels[2]):
                         if (i or j or k) and (k % 6 == 0):
                             file_out.write("\n")
-                        file_out.write(" {0: .5E}".format(self.volume_data[i, j, k]))
+                        file_out.write(" {0: .8E}".format(self.volume_data[i, j, k]))
 
 
     def apply_gaussian_filter(self, sigma=1):
@@ -271,7 +295,9 @@ class OrbitalSurfaces:
 
 
 # Generate the new filtered CUBE file
+orbital = OrbitalSurfaces()
 raw_CUBE_files = OrbitalSurfaces.find_eigenstate_cube_files()
+sigma, isovalue = orbital.get_sigma_and_isovalues()
 print(f'\n{len(raw_CUBE_files)} raw CUBE files found in the current folder.\nApplying gaussian filter...\n')
 file_no = 1
 for file in raw_CUBE_files:
@@ -279,14 +305,15 @@ for file in raw_CUBE_files:
     orbital.filename = file
     print(f'File {orbital.filename} ({file_no} out of {len(raw_CUBE_files)}) being filtered. Please stand by...')
     orbital.read_cube_file()
-    orbital.apply_gaussian_filter(sigma=6)
+    orbital.apply_gaussian_filter(sigma=sigma)
     orbital.write_cube_file(f'filtered_{orbital.filename}')
     file_no += 1
-isovalue = 5e-5
 euler_angles = orbital.get_angles_to_rotate_molecule_towards_z_axis()
 
 ##############################################################################
 """This part is for the plotting of the isosurfaces using VMD."""
+
+sys.argv = [sys.argv[0]]
 
 vmd_cube_help = """vmd_cube is a script to render cube files with vmd.
 To generate cube files with Psi4 add the command cubeprop() at the end of your input file."""
@@ -302,7 +329,8 @@ vmd_template = """#
 # Load the molecule and change the atom style
 mol load cube PARAM_CUBEFILE.cube
 mol modcolor 0 PARAM_CUBENUM Element
-mol modstyle 0 PARAM_CUBENUM Licorice 0.110000 10.000000 10.000000
+mol modstyle 0 PARAM_CUBENUM Ribbons
+#mol modstyle 0 PARAM_CUBENUM Licorice 0.110000 10.000000 10.000000
 #mol modstyle 0 PARAM_CUBENUM CPK 0.400000 0.40000 30.000000 16.000000
 
 # Define the material
@@ -472,11 +500,11 @@ def read_options(options):
     parser.add_argument('--no-labels', action="store_true",
                    help='do not add labels to images. (string, default = false)')
 
-    parser.add_argument('--imagew', metavar='<integer>', type=int, nargs='?',default=1024,
+    parser.add_argument('--imagew', metavar='<integer>', type=int, nargs='?', default=RESOLUTION,
                    help='the width of images (integer, default = 250)')
-    parser.add_argument('--imageh', metavar='<integer>', type=int, nargs='?',default=1024,
+    parser.add_argument('--imageh', metavar='<integer>', type=int, nargs='?', default=RESOLUTION,
                    help='the height of images (integer, default = 250)')
-    parser.add_argument('--fontsize', metavar='<integer>', type=int, nargs='?',default=20,
+    parser.add_argument('--fontsize', metavar='<integer>', type=int, nargs='?', default=20,
                    help='the font size (integer, default = 20)')
 
     parser.add_argument('--interactive', action="store_true",
@@ -612,9 +640,9 @@ def write_and_run_vmd_script(options,cube_files):
         vmd_script_head = multigsub(replacement_map,vmd_template)
         
         if options["INTERACTIVE"][0] == 'True':
-            vmd_script_render = multigsub(replacement_map,vmd_template_interactive)
+            vmd_script_render = multigsub(replacement_map, vmd_template_interactive)
         else:
-            vmd_script_render = multigsub(replacement_map,vmd_template_render)
+            vmd_script_render = multigsub(replacement_map, vmd_template_render)
 
         vmd_script.write(vmd_script_head + "\n" + vmd_script_surface + "\n" + vmd_script_render)
 
@@ -741,23 +769,30 @@ os.remove('.vmd_mo_script.vmd')
 """ This part is for stitching together the generated images. """
 
 def stitch_images_together(filenames, spin):
-    plt.figure(figsize=(8, 3*len(filenames)))
+    plt.figure(figsize=(2*len(filenames), len(filenames) + 1))
     for num, file in enumerate(filenames):
-        plt.subplot(len(filenames), 1, num + 1)
         img = PIL.Image.open(file)
         if file.startswith('filtered'):
+            plt.subplot(2, len(filenames)//2, len(filenames)//2 + num//2 + 1)
             subfigure_name = ""
         else:
+            plt.subplot(2, len(filenames)//2, num//2 + 1)
             subfigure_name = file.split('_')[3]
             subfigure_name = str(int(subfigure_name)) # Removes the zeros from the subfigure name.
-        plt.text(970, 450, subfigure_name, fontsize=100)
-        plt.xlim(0, 1000) # The limits are 0 and 1000.
-        plt.ylim(0, 1000) # The limits are 0 and 1000.
-        plt.axis('off')
+            plt.title(f'State {subfigure_name}', fontsize=50)
+        if num == 0:
+            plt.ylabel('raw DFT', fontsize=40)
+        elif num == 1:
+            plt.ylabel('filtered DFT', fontsize=40)
+        plt.xlim(0, RESOLUTION)
+        plt.ylim(0, RESOLUTION)
+        plt.xticks([])
+        plt.yticks([])
+        plt.box(False)
         plt.subplots_adjust(left=0.1)
-        plt.imshow(img)
+        plt.imshow(img, interpolation='none', aspect='auto')
         plt.tight_layout()
-        plt.savefig(f'orbitals_{spin}.png')
+        plt.savefig(f'orbitals_{spin}.svg')
 
 filenames = {}
 for spin in ['spin_1', 'spin_2']:
