@@ -17,14 +17,14 @@ Version 1 (01/06/23). No known bugs. Features yet to implement:
     - Print filenames of the images that are being generated one by one.
     - It only supports CUBE files with cubic axis vectors. Add capability to read
     other types of coordinate systems.
-This is version 2 (30/06/23). No known bugs. Features yet to implement:
+This is version 2 (30/06/23). Features yet to implement:
     - Ask user if he wants to plot both the original and the filtered orbitals.
     - Let user choose surface color.
     - Print filenames of the images that are being generated one by one.
     - Make the program faster.
-    - Reduce Shininess of the surfaces
     - Orient the molecule along the x-axis
-    - Make VDM accept all isovalues greater than 1e-6
+    - Fixing bug that squishes the images when the amout of cube files is smaller than 3
+    - Fix bug with Euler's angles
 
 CUBE file reading and writing code adapted from:
 https://gist.github.com/aditya95sriram/8d1fccbb91dae93c4edf31cd6a22510f
@@ -87,7 +87,7 @@ class OrbitalSurfaces:
             return sigma, isovalue
         except IndexError:
             print(f'\nYou did not specify the sigma nor the isovalue.')
-            self.arguments.append(input('Please enter the value for sigma: '))
+            self.arguments.append(input('Please enter the value for the gaussian sigma: '))
             self.arguments.append(input('Please enter the isovalue: '))
             return self.get_sigma_and_isovalues()
         except ValueError or TypeError:
@@ -143,14 +143,16 @@ class OrbitalSurfaces:
         self.x_axis_mesh, self.y_axis_mesh, self.z_axis_mesh = mesh
 
 
-    def write_cube_file(self, filename):
+    def write_cube_file(self, filename, sigma):
         """Writes the information of the object into a CUBE file with the correct formatting.
         
         Parameters:
             filename: name of the newly written CUBE file. 
         """
         with open(filename, 'w') as file_out:
-            file_out.write(f' Gaussian-smoothed version of {self.filename}.\n *********************************************\n') # Write the comment lines.
+            text = f'Gaussian-smoothed (sigma = {sigma}) version of {self.filename}'
+            file_out.write(text + '\n') # Write the comment lines.
+            file_out.write('*' * len(text) + '\n')
             # Write unit cell data.
             new_no_voxels = np.shape(self.volume_data)
             file_out.write("{:5} {:11.6f} {:11.6f} {:11.6f}\n".format(self.no_atoms, self.origin_coordinates[0], self.origin_coordinates[1], self.origin_coordinates[2]))
@@ -256,13 +258,23 @@ class OrbitalSurfaces:
             for line in self.aimsout_list[line_lower_limit: line_upper_limit]:
                 print(line[:-1])
 
+    def calculate_centroid_coordinates(self):
+        # Name is self-explanatory.
+        centroid_x = sum(self.atoms_x_coordinate)/self.no_atoms
+        centroid_y = sum(self.atoms_y_coordinate)/self.no_atoms
+        centroid_z = sum(self.atoms_z_coordinate)/self.no_atoms
+        return centroid_x, centroid_y, centroid_z
 
     def get_angles_to_rotate_molecule_towards_z_axis(self):
         """Calculates the angles that will rotate the molecule towards the z axis."""
         # 0. Find plane that fits best all the atoms in the molecule.
-        min_squares_matrix = np.array([self.atoms_x_coordinate, self.atoms_y_coordinate]).T
+        centroid_x, centroid_y, centroid_z = self.calculate_centroid_coordinates()
+        x_for_fitting = np.array(self.atoms_x_coordinate) - centroid_x
+        y_for_fitting = np.array(self.atoms_y_coordinate) - centroid_y
+        z_for_fitting = np.array(self.atoms_z_coordinate) - centroid_z
+        min_squares_matrix = np.array([x_for_fitting, y_for_fitting]).T
         n = np.dot(np.matmul(np.linalg.inv(np.matmul(min_squares_matrix.T, min_squares_matrix)), min_squares_matrix.T),
-                   np.array(self.atoms_z_coordinate))
+                   np.array(z_for_fitting))
         nz = (n[0]**2 + n[1]**2 + 1)**-0.5
         nx = -n[0] * nz
         ny = -n[1] * nz
@@ -306,7 +318,7 @@ for file in raw_CUBE_files:
     print(f'File {orbital.filename} ({file_no} out of {len(raw_CUBE_files)}) being filtered. Please stand by...')
     orbital.read_cube_file()
     orbital.apply_gaussian_filter(sigma=sigma)
-    orbital.write_cube_file(f'filtered_{orbital.filename}')
+    orbital.write_cube_file(f'filtered_{orbital.filename}', sigma)
     file_no += 1
 euler_angles = orbital.get_angles_to_rotate_molecule_towards_z_axis()
 
@@ -333,26 +345,6 @@ mol modstyle 0 PARAM_CUBENUM Ribbons
 #mol modstyle 0 PARAM_CUBENUM Licorice 0.110000 10.000000 10.000000
 #mol modstyle 0 PARAM_CUBENUM CPK 0.400000 0.40000 30.000000 16.000000
 
-# Define the material
-material change ambient Opaque 0.310000
-material change diffuse Opaque 0.720000
-material change specular Opaque 0.500000
-material change shininess Opaque 0.480000
-material change opacity Opaque 1.000000
-material change outline Opaque 0.000000
-material change outlinewidth Opaque 0.000000
-material change transmode Opaque 0.000000
-material change specular Opaque 0.750000
-
-material change ambient   EdgyShiny 0.310000
-material change diffuse   EdgyShiny 0.720000
-material change shininess EdgyShiny 1.0000
-material change opacity   EdgyShiny PARAM_OPACITY
-
-# Customize atom colors
-color Element C silver
-color Element H white
-
 # Rotate and translate the molecule
 rotate x by PARAM_RX
 rotate y by PARAM_RY
@@ -362,7 +354,7 @@ scale by PARAM_SCALE
 
 # Eliminate the axis and perfect the view
 axes location Off
-display projection Orthographic
+display projection orthographic
 display depthcue off
 display resize PARAM_IMAGEW PARAM_IMAGEH
 color Display Background white"""
@@ -373,7 +365,7 @@ vmd_template_surface = """#
 mol color ColorID PARAM_ISOCOLOR
 mol representation Isosurface PARAM_ISOVALUE 0 0 0 1 1
 mol selection all
-mol material EdgyShiny
+mol material Diffuse
 mol addrep PARAM_CUBENUM
 """
 
@@ -386,12 +378,6 @@ vmd_template_render = """
 # Render
 render TachyonInternal PARAM_CUBEFILE.tga
 mol delete PARAM_CUBENUM
-"""
-
-vmd_template_rotate = """
-light 1 off
-light 0 rot y  30.0
-light 0 rot x -30.0
 """
 
 default_path = os.getcwd()
@@ -472,8 +458,8 @@ def read_options(options):
                    help='a list of isosurface values (a list of floats, default = [0.05,-0.05])')
     parser.add_argument('--isocolor', metavar='<integer>', type=int, nargs='*',default=[3,23],
                    help='a list of isosurface color IDs (a list of integers, default = [3,23])')
-    parser.add_argument('--isocut', metavar='<isovalue cutoff>', type=float, nargs='?',default=1.0e-5,
-                   help='cutoff value for rendering an isosurface (float, default = 1.0e-5)')
+    parser.add_argument('--isocut', metavar='<isovalue cutoff>', type=float, nargs='?',default=1e-8,
+                   help='cutoff value for rendering an isosurface (float, default = 1.0e-8)')
                    
     parser.add_argument('--rx', metavar='<angle>', type=float, nargs='?', default=euler_angles[0],
                    help='the x-axis rotation angle (float, default = 30.0)')
@@ -595,7 +581,6 @@ def find_cubes(options):
 
 def write_and_run_vmd_script(options,cube_files):
     vmd_script = open(vmd_script_name,"w+")
-    vmd_script.write(vmd_template_rotate)
 
     # Define a map that contains all the values of the VMD parameters
     replacement_map = {}
@@ -789,6 +774,9 @@ def stitch_images_together(filenames, spin):
         plt.xticks([])
         plt.yticks([])
         plt.box(False)
+        ax = plt.gca()
+        ax.set_aspect('equal', adjustable='box')
+#        plt.axis('square')
         plt.subplots_adjust(left=0.1)
         plt.imshow(img, interpolation='none', aspect='auto')
         plt.tight_layout()
