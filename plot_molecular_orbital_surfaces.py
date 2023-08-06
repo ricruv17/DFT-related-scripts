@@ -20,7 +20,6 @@ Version 1 (01/06/23). No known bugs. Features yet to implement:
 This is version 2 (30/06/23). Features yet to implement:
     - Ask user if he wants to plot both the original and the filtered orbitals.
     - Let user choose surface color.
-    - Print filenames of the images that are being generated one by one.
     - Make the program faster.
     - Orient the molecule along the x-axis
     - Fixing bug that squishes the images when the amout of cube files is smaller than 3
@@ -315,7 +314,7 @@ file_no = 1
 for file in raw_CUBE_files:
     orbital = OrbitalSurfaces()
     orbital.filename = file
-    print(f'File {orbital.filename} ({file_no} out of {len(raw_CUBE_files)}) being filtered. Please stand by...')
+    print(f'Filtering {orbital.filename} ({file_no} out of {len(raw_CUBE_files)}). Please stand by...')
     orbital.read_cube_file()
     orbital.apply_gaussian_filter(sigma=sigma)
     orbital.write_cube_file(f'filtered_{orbital.filename}', sigma)
@@ -327,23 +326,19 @@ euler_angles = orbital.get_angles_to_rotate_molecule_towards_z_axis()
 
 sys.argv = [sys.argv[0]]
 
-vmd_cube_help = """vmd_cube is a script to render cube files with vmd.
-To generate cube files with Psi4 add the command cubeprop() at the end of your input file."""
-
-vmd_exe = ""
+vmd_cube_help = """
+vmd_cube is a script to render cube files with vmd.
+To generate cube files with Psi4 add the command cubeprop() at the end of your input file.
+"""
 
 vmd_script_name = ".vmd_mo_script.vmd"
 
-vmd_template = """#
+vmd_template = """
 # VMD script to plot MOs from cube files
-#
 
 # Load the molecule and change the atom style
 mol load cube PARAM_CUBEFILE.cube
-mol modcolor 0 PARAM_CUBENUM Element
 mol modstyle 0 PARAM_CUBENUM Ribbons
-#mol modstyle 0 PARAM_CUBENUM Licorice 0.110000 10.000000 10.000000
-#mol modstyle 0 PARAM_CUBENUM CPK 0.400000 0.40000 30.000000 16.000000
 
 # Rotate and translate the molecule
 rotate x by PARAM_RX
@@ -357,10 +352,10 @@ axes location Off
 display projection orthographic
 display depthcue off
 display resize PARAM_IMAGEW PARAM_IMAGEH
-color Display Background white"""
+color Display Background white
+"""
 
-
-vmd_template_surface = """#
+vmd_template_surface = """
 # Add a surface
 mol color ColorID PARAM_ISOCOLOR
 mol representation Isosurface PARAM_ISOVALUE 0 0 0 1 1
@@ -369,7 +364,7 @@ mol material Diffuse
 mol addrep PARAM_CUBENUM
 """
 
-vmd_template_interactive = """#
+vmd_template_interactive = """
 # Disable rendering
 mol off PARAM_CUBENUM
 """
@@ -385,7 +380,7 @@ default_path = os.getcwd()
 # Default parameters
 options = {"ISOVALUE"     : [None,"Isosurface Value(s)"],
            "ISOCOLOR"     : [None,"Isosurface Color(s)"],
-           "ISOCUT"       : [None,"Isosurface Value Cutoff"],
+           "ISOCUT"       : [None,"Isosurface Cutoff Value"],
            "RX"           : [None,"X-axis Rotation"],
            "RY"           : [None,"Y-axis Rotation"],
            "RZ"           : [None,"Z-axis Rotation"],
@@ -424,14 +419,14 @@ def which(program):
     return None
 
 
-def multigsub(subs,str):
+def multigsub(subs, str):
     for k,v in subs.items():
         str = re.sub(k,v,str)
     return str
 
-environ['VMDPATH'] = '/mnt/c/Program Files \(x86\)/University of Illinois/VMD/vmd.exe'
-# environ['VMDPATH'] = '/usr/local/bin/vmd' # for my previous laptop
 def find_vmd(options):
+    environ['VMDPATH'] = '/mnt/c/Program Files \(x86\)/University of Illinois/VMD/vmd.exe'
+    # environ['VMDPATH'] = '/usr/local/bin/vmd' # for my previous laptop
     if environ['VMDPATH']:
         vmdpath = environ['VMDPATH']
         vmdpath = multigsub({" " : r"\ "},vmdpath)
@@ -454,9 +449,9 @@ def read_options(options):
     parser.add_argument('data', metavar='<cubefile dir>', type=str, nargs='?',default=".",
                    help='The directory containing the cube files.')
                    
-    parser.add_argument('--isovalue', metavar='<isovalue>', type=float, nargs='*',default=[isovalue,-isovalue],
+    parser.add_argument('--isovalue', metavar='<isovalue>', type=float, nargs='*',default=[-isovalue, isovalue],
                    help='a list of isosurface values (a list of floats, default = [0.05,-0.05])')
-    parser.add_argument('--isocolor', metavar='<integer>', type=int, nargs='*',default=[3,23],
+    parser.add_argument('--isocolor', metavar='<integer>', type=int, nargs='*',default=[23, 3],
                    help='a list of isosurface color IDs (a list of integers, default = [3,23])')
     parser.add_argument('--isocut', metavar='<isovalue cutoff>', type=float, nargs='?',default=1e-8,
                    help='cutoff value for rendering an isosurface (float, default = 1.0e-8)')
@@ -467,7 +462,6 @@ def read_options(options):
                    help='the y-axis rotation angle (float, default = 40.0)')
     parser.add_argument('--rz', metavar='<angle>', type=float, nargs='?', default=euler_angles[2],
                    help='the z-axis rotation angle (float, default = 15.0)')
-
 
     parser.add_argument('--tx', metavar='<length>', type=float, nargs='?',default=0.0,
                    help='the x-axis translation (float, default = 0.0)')
@@ -545,7 +539,8 @@ def read_options(options):
     print("\nParameters:")
     sorted_parameters = sorted(options.keys())
     for k in sorted_parameters:
-        print("  %-20s %s" % (options[k][1],str(options[k][0])))
+        print("  %-25s %s" % (options[k][1], str(options[k][0])))
+    print(" ")
 
 def find_cubes(options):
     # Find all the cube files in a given directory
@@ -579,17 +574,16 @@ def find_cubes(options):
     return sorted(sorted_files)
 
 
-def write_and_run_vmd_script(options,cube_files):
-    vmd_script = open(vmd_script_name,"w+")
-
+def write_and_run_vmd_script(options, cube_files):
     # Define a map that contains all the values of the VMD parameters
     replacement_map = {}
     for (k, v) in iteritems(options):
         key = "PARAM_" + k.upper()
         replacement_map[key] = v[0]
 
-    for n,f in enumerate(cube_files):
-        replacement_map["PARAM_CUBENUM"] = '%03d' % n
+    for n, f in enumerate(cube_files):
+        vmd_script = open(vmd_script_name, "w+")
+        replacement_map["PARAM_CUBENUM"] = '%03d' % 0 
         replacement_map["PARAM_CUBEFILE"] = options["CUBEDIR"][0] + '/' + f[:-5]
 
         # Default isocontour values or user-provided
@@ -597,10 +591,10 @@ def write_and_run_vmd_script(options,cube_files):
         isocolor = options["ISOCOLOR"][0][:]
         
         # Read isocontour values from file, if available
-        with open(f,'r') as file:
+        with open(f, 'r') as file:
             l1 = file.readline()
             l2 = file.readline()
-            m = re.search(r'density: \(([-+]?[0-9]*\.?[0-9]+)\,([-+]?[0-9]*\.?[0-9]+)\)',l2)
+            m = re.search(r'density: \(([-+]?[0-9]*\.?[0-9]+)\,([-+]?[0-9]*\.?[0-9]+)\)', l2)
             if m:
                 isovalue[0] = float(m.groups()[0])
                 isovalue[1] = float(m.groups()[1])
@@ -611,15 +605,15 @@ def write_and_run_vmd_script(options,cube_files):
             print("Quitting: Please specify the same number of isosurface values and colors.")
             quit()
         else:
-            print("Plotting %s with isosurface values" % (f), str(isovalue))
+            print(f"Plotting {f} ({n + 1} out of {len(cube_files)}). Please stand by...") #with isovalues \u00B1{float(isovalue[1])}
 
         vmd_script_surface = ""
-        surf = zip(isovalue,isocolor)
+        surf = zip(isovalue, isocolor)
         for c in surf:
             if abs(c[0]) > float(options["ISOCUT"][0]):
                 replacement_map["PARAM_ISOVALUE"] = str(c[0])
                 replacement_map["PARAM_ISOCOLOR"] = str(c[1])
-                vmd_script_surface += multigsub(replacement_map,vmd_template_surface)
+                vmd_script_surface += multigsub(replacement_map, vmd_template_surface)
             else:
                 print(" * Skipping isosurface with isocontour value %f" % c[0])
         vmd_script_head = multigsub(replacement_map,vmd_template)
@@ -631,68 +625,19 @@ def write_and_run_vmd_script(options,cube_files):
 
         vmd_script.write(vmd_script_head + "\n" + vmd_script_surface + "\n" + vmd_script_render)
 
-    if options["INTERACTIVE"][0] == 'False':
-        vmd_script.write("quit")
-        vmd_script.close()
-        # Call VMD in text mode
-        FNULL = open(os.devnull, 'w')
-        subprocess.call(("%s -dispdev text -e %s" % (options["VMDPATH"][0],vmd_script_name)),stdout=FNULL, shell=True)
-    else:
-        vmd_script.close()
-        # Call VMD in graphic mode
-        FNULL = open(os.devnull, 'w')
-        subprocess.call(("%s -e %s" % (options["VMDPATH"][0],vmd_script_name)),stdout=FNULL, shell=True)
-
-
-def call_montage(options,cube_files):
-    if options["MONTAGE"][0] == 'True':
-        # Optionally, combine all figures into one image using montage
-        montage_exe = which("montage")
-        if montage_exe:
-            alpha_mos = []
-            beta_mos = []
-            densities = []
-            basis_functions = []
-            for f in cube_files:
-                tga_file = f[:-5] + ".tga"
-                if "Psi_a" in f:
-                    alpha_mos.append(tga_file)
-                if "Psi_b" in f:
-                    beta_mos.append(tga_file)
-                if "D" in f:
-                    densities.append(tga_file)
-                if "Phi" in f:
-                    basis_functions.append(tga_file)
-
-            # Sort the MOs
-            sorted_mos = []
-            for set in [alpha_mos,beta_mos]:
-                sorted_set = []
-                for s in set:
-                    s_split = s.split('_')
-                    sorted_set.append((int(s_split[2]),"Psi_a_%s_%s" % (s_split[2],s_split[3])))
-                sorted_set = sorted(sorted_set)
-                sorted_mos.append([s[1] for s in sorted_set])
-           
-            os.chdir(options["CUBEDIR"][0])
-                    
-            # Add labels
-            if options["LABEL_MOS"][0] == 'True':
-                for f in sorted_mos[0]:
-                    f_split = f.split('_')
-                    label = '%s\ \(%s\)' % (f_split[3][:-4],f_split[2])
-                    subprocess.call(("montage -pointsize %s -label %s %s -geometry '%sx%s+0+0>' %s" %
-                        (options["FONTSIZE"][0],label,f,options["IMAGEW"][0],options["IMAGEH"][0],f)), shell=True)
-
-            # Combine together in one image
-            if len(alpha_mos) > 0:
-                subprocess.call(("%s %s -geometry +2+2 AlphaMOs.tga" % (montage_exe," ".join(sorted_mos[0]))), shell=True)
-            if len(beta_mos) > 0:
-                subprocess.call(("%s %s -geometry +2+2 BetaMOs.tga" % (montage_exe," ".join(sorted_mos[1]))), shell=True)
-            if len(densities) > 0:
-                subprocess.call(("%s %s -geometry +2+2 Densities.tga" % (montage_exe," ".join(densities))), shell=True)
-            if len(basis_functions) > 0:
-                subprocess.call(("%s %s -geometry +2+2 BasisFunctions.tga" % (montage_exe," ".join(basis_functions))), shell=True)
+        if options["INTERACTIVE"][0] == 'False':
+            vmd_script.write("quit")
+            vmd_script.close()
+            # Call VMD in text mode
+            FNULL = open(os.devnull, 'w')
+            subprocess.call(("%s -dispdev text -e %s" % (options["VMDPATH"][0], vmd_script_name)), stdout=FNULL, shell=True)
+        else:
+            vmd_script.close()
+            # Call VMD in graphic mode
+            FNULL = open(os.devnull, 'w')
+            subprocess.call(("%s -e %s" % (options["VMDPATH"][0], vmd_script_name)), stdout=FNULL, shell=True)
+        os.remove('.vmd_mo_script.vmd')
+    print(' ')
 
 
 def zip_files(cube_files,options):
@@ -700,39 +645,7 @@ def zip_files(cube_files,options):
     if options["GZIP"][0] == 'True':
         print("\nCompressing cube files")
         FNULL = open(os.devnull, 'w')
-        subprocess.call(("gzip %s" % " ".join(cube_files)),stdout=FNULL, shell=True)
-
-
-def get_cumulative_density_iso_value(file,sigma):
-    """Find the isosurface values that capture a certain amount of the total density (sigma)."""
-    cube_data = []
-    norm = 0.0
-    k = 0
-    with open(file) as f:
-        for line in f:
-            if k > 6:
-                for s in line.split():
-                    value = float(s)
-                    value_sqr = value * value
-                    norm = norm + value_sqr
-                    cube_data.append((value_sqr,value))
-            k = k + 1
-
-    cube_data.sort(reverse=True)
-
-    sum = 0.0
-    positive_iso = 0.0
-    negative_iso = 0.0
-    for (value_sqr,value) in cube_data:
-        if sum < sigma:
-            sum = sum + value_sqr / norm
-            if value > 0:
-                positive_iso = value
-            else:
-                negative_iso = value
-        else:
-            return (positive_iso, negative_iso)
-    return (positive_iso, negative_iso)
+        subprocess.call(("gzip %s" % " ".join(cube_files)), stdout=FNULL, shell=True)
 
 
 def main(argv):
@@ -740,15 +653,13 @@ def main(argv):
     read_options(options)
     save_setup_command(argv)
     cube_files = find_cubes(options)
-    write_and_run_vmd_script(options,cube_files)
-    call_montage(options,cube_files)
-    zip_files(cube_files,options)
+    write_and_run_vmd_script(options, cube_files)
+    zip_files(cube_files, options)
 
 if __name__ == '__main__':
     main(sys.argv)
 
 os.remove('.vmd_cube_command')
-os.remove('.vmd_mo_script.vmd')
 
 ##############################################################################
 """ This part is for stitching together the generated images. """
@@ -773,9 +684,9 @@ def stitch_images_together(filenames, spin):
         plt.ylim(0, RESOLUTION)
         plt.xticks([])
         plt.yticks([])
-        plt.box(False)
+#        plt.box(False)
         ax = plt.gca()
-        ax.set_aspect('equal', adjustable='box')
+        ax.set_aspect('equal') #, adjustable='box')
 #        plt.axis('square')
         plt.subplots_adjust(left=0.1)
         plt.imshow(img, interpolation='none', aspect='auto')
@@ -789,7 +700,8 @@ for spin in ['spin_1', 'spin_2']:
         if (file.find(spin) != -1):
             filenames[spin].append(file.replace('.cube', '.tga'))
             filenames[spin].append(f"filtered_{file.replace('.cube', '.tga')}")
-    if bool(spin):
+    if bool(filenames[spin]):
+        print(f'Stitching images of orbitals with {spin} together. Please stand by...')
         stitch_images_together(filenames[spin], spin)
 
 orbital.print_orbital_data()
