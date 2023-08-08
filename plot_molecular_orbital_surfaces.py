@@ -9,20 +9,11 @@ cube_001_eigenstate_00117_spin_1.cube       CUBE file containing one Kohn-Sham e
 
 Written by Ricardo Ruvalcaba and Shadi Fatayer at MONA-group in King Abdullah University of Science and Technology (KAUST).
 Contact: ricardo.ruvalcababriones@kaust.edu.sa
-Version 1 (01/06/23). No known bugs. Features yet to implement:
-    - Plot and format final images of the orbitals (most likely on VMD).
-    - Ask user if he wants to plot both the original and the filtered orbitals.
-    - Let user choose surface color.
-    - Rotate and align the molecule.
-    - Print filenames of the images that are being generated one by one.
-    - It only supports CUBE files with cubic axis vectors. Add capability to read
-    other types of coordinate systems.
 This is version 2 (30/06/23). Features yet to implement:
     - Ask user if he wants to plot both the original and the filtered orbitals.
     - Let user choose surface color.
     - Make the program faster.
     - Orient the molecule along the x-axis
-    - Fixing bug that squishes the images when the amout of cube files is smaller than 3
     - Fix bug with Euler's angles
 
 CUBE file reading and writing code adapted from:
@@ -30,7 +21,10 @@ https://gist.github.com/aditya95sriram/8d1fccbb91dae93c4edf31cd6a22510f
 
 When executed, the script will automatically detect all CUBE files with the correct nomenclature.
 To execute, just run on your bash terminal:
-python3 plot_molecular_orbital_surfaces.py
+python3 plot_molecular_orbital_surfaces.py SIGMA ISOVALUE
+    SIGMA: is the sigma of the gaussian filter in reciprocal space
+    ISOVALUE: is the value that will be used to plot the isosurface of the molecular orbital
+    values of 6 and 5e-5, respectively, were used in this article https://doi.org/10.1002/ange.202009200
 """
 from __future__ import print_function
 import argparse
@@ -666,6 +660,13 @@ os.remove('.vmd_cube_command')
 
 def stitch_images_together(filenames, spin):
     plt.figure(figsize=(2*len(filenames), len(filenames) + 1))
+    if len(filenames) == 2:
+        fontsize = 16
+    elif len(filenames) == 4:
+        fontsize = 28
+    else:
+        fontsize = 40
+
     for num, file in enumerate(filenames):
         img = PIL.Image.open(file)
         if file.startswith('filtered'):
@@ -675,22 +676,19 @@ def stitch_images_together(filenames, spin):
             plt.subplot(2, len(filenames)//2, num//2 + 1)
             subfigure_name = file.split('_')[3]
             subfigure_name = str(int(subfigure_name)) # Removes the zeros from the subfigure name.
-            plt.title(f'State {subfigure_name}', fontsize=50)
+            plt.title(f'State {subfigure_name}', fontsize=fontsize)
         if num == 0:
-            plt.ylabel('raw DFT', fontsize=40)
+            plt.ylabel('raw DFT', fontsize=fontsize)
         elif num == 1:
-            plt.ylabel('filtered DFT', fontsize=40)
+            plt.ylabel('filtered DFT', fontsize=fontsize)
         plt.xlim(0, RESOLUTION)
         plt.ylim(0, RESOLUTION)
         plt.xticks([])
         plt.yticks([])
-#        plt.box(False)
-        ax = plt.gca()
-        ax.set_aspect('equal') #, adjustable='box')
-#        plt.axis('square')
-        plt.subplots_adjust(left=0.1)
+        plt.box(False)
+        plt.gca().set_box_aspect(1)
+        plt.tight_layout(pad=0)
         plt.imshow(img, interpolation='none', aspect='auto')
-        plt.tight_layout()
         plt.savefig(f'orbitals_{spin}.svg')
 
 filenames = {}
