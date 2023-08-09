@@ -14,7 +14,6 @@ This is version 2 (30/06/23). Features yet to implement:
     - Let user choose surface color.
     - Make the program faster.
     - Orient the molecule along the x-axis
-    - Fix bug with Euler's angles
 
 CUBE file reading and writing code adapted from:
 https://gist.github.com/aditya95sriram/8d1fccbb91dae93c4edf31cd6a22510f
@@ -260,42 +259,32 @@ class OrbitalSurfaces:
 
     def get_angles_to_rotate_molecule_towards_z_axis(self):
         """Calculates the angles that will rotate the molecule towards the z axis."""
-        # 0. Find plane that fits best all the atoms in the molecule.
+        # Process atomic coordinates to be able to find the best-fitting plane
         centroid_x, centroid_y, centroid_z = self.calculate_centroid_coordinates()
         x_for_fitting = np.array(self.atoms_x_coordinate) - centroid_x
         y_for_fitting = np.array(self.atoms_y_coordinate) - centroid_y
         z_for_fitting = np.array(self.atoms_z_coordinate) - centroid_z
+        # Find the vector normal to the plane that best fits the molecule
         min_squares_matrix = np.array([x_for_fitting, y_for_fitting]).T
         n = np.dot(np.matmul(np.linalg.inv(np.matmul(min_squares_matrix.T, min_squares_matrix)), min_squares_matrix.T),
                    np.array(z_for_fitting))
         nz = (n[0]**2 + n[1]**2 + 1)**-0.5
         nx = -n[0] * nz
         ny = -n[1] * nz
-        ux, uy, uz = np.cross([nx, ny, nz], [0, 0, 1])
-        theta = np.arccos(nz)
-        row1 = [np.cos(theta) + ux ** 2 * (1 - np.cos(theta)),
-                ux * uy * (1 - np.cos(theta)) - uz * np.sin(theta),
-                ux * uz * (1 - np.cos(theta)) + uy * np.sin(theta)]
-        row2 = [uy * ux * (1 - np.cos(theta)) + uz * np.sin(theta),
-                np.cos(theta) + uy ** 2 * (1 - np.cos(theta)),
-                uy * uz * (1 - np.cos(theta)) - ux * np.sin(theta)]
-        row3 = [uz * ux * (1 - np.cos(theta)) - uy * np.sin(theta),
-                uz * uy * (1 - np.cos(theta)) + ux * np.sin(theta),
-                np.cos(theta) + uz ** 2 * (1 - np.cos(theta))]
-        matrix = np.array([row1, row2, row3])
+        vector = (nx, ny, nz)
+        # Calculate the rotation angle around the x-axis to align the vector with the xz-plane
+        theta_x = np.arctan2(vector[1], vector[2])
+        # Create the rotation matrix around the x-axis
+        rotation_matrix_x = np.array([[1, 0, 0],
+                                    [0, np.cos(theta_x), -np.sin(theta_x)],
+                                    [0, np.sin(theta_x), np.cos(theta_x)]])
+        # Rotate the vector around the x-axis
+        vector_on_xz_plane = np.dot(rotation_matrix_x, vector)
 
-        sy = np.sqrt(matrix[0, 0]**2 + matrix[1, 0]**2)
-        if sy < 1e-6:
-            # Singular case: sy is close to zero
-            # This corresponds to a rotation about the y-axis by -90 degrees
-            # We can set the other Euler angles to zero in this case
-            theta_x = np.arctan2(-matrix[2, 1], matrix[2, 2])
-            theta_y = -np.pi/2
-            theta_z = 0
-        else:
-            theta_x = np.arctan2(matrix[2, 1], matrix[2, 2])
-            theta_y = np.arctan2(-matrix[2, 0], sy)
-            theta_z = np.arctan2(matrix[1, 0], matrix[0, 0])
+        vector = vector_on_xz_plane
+        # Calculate the rotation angle around the y-axis to align the vector on the xz-plane with the z-axis
+        theta_y = np.arctan2(vector[2], vector[0]) - np.pi/2
+        theta_z = 0
         return np.array((theta_x, theta_y, theta_z))*180/np.pi
 
 
