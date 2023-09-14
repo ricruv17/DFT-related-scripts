@@ -14,6 +14,10 @@ This is version 2 (30/06/23). Features yet to implement:
     - Let user choose surface color.
     - Make the program faster.
     - Orient the molecule along the x-axis
+This is version 3 (14/09/23). Features yet to implement:
+    - Ask user if he wants to plot both the original and the filtered orbitals.
+    - Let user choose surface color.
+    - Make the program faster.
 
 CUBE file reading and writing code adapted from:
 https://gist.github.com/aditya95sriram/8d1fccbb91dae93c4edf31cd6a22510f
@@ -33,7 +37,7 @@ import subprocess
 import os
 import datetime
 from os import listdir, environ
-from os.path import isfile, join
+from os.path import join
 from future.utils import iteritems
 
 import numpy as np
@@ -257,14 +261,15 @@ class OrbitalSurfaces:
         centroid_z = sum(self.atoms_z_coordinate)/self.no_atoms
         return centroid_x, centroid_y, centroid_z
 
-    def get_angles_to_rotate_molecule_towards_z_axis(self):
-        """Calculates the angles that will rotate the molecule towards the z axis."""
-        # Process atomic coordinates to be able to find the best-fitting plane
+    def get_euler_angles(self):
+        """Calculates the angles that will rotate the molecule towards the z axis and align its symmetry axis with the y axis."""
+        # 0. First we calculate the parameters that will be needed for the calculation of the angles.
+        # 0.0. Process atomic coordinates to be able to find the best-fitting plane.
         centroid_x, centroid_y, centroid_z = self.calculate_centroid_coordinates()
         x_for_fitting = np.array(self.atoms_x_coordinate) - centroid_x
         y_for_fitting = np.array(self.atoms_y_coordinate) - centroid_y
         z_for_fitting = np.array(self.atoms_z_coordinate) - centroid_z
-        # Find the vector normal to the plane that best fits the molecule
+        # 0.1. Find the vector normal to the plane that best fits the molecule.
         min_squares_matrix = np.array([x_for_fitting, y_for_fitting]).T
         n = np.dot(np.matmul(np.linalg.inv(np.matmul(min_squares_matrix.T, min_squares_matrix)), min_squares_matrix.T),
                    np.array(z_for_fitting))
@@ -272,20 +277,61 @@ class OrbitalSurfaces:
         nx = -n[0] * nz
         ny = -n[1] * nz
         vector = (nx, ny, nz)
-        # Calculate the rotation angle around the x-axis to align the vector with the xz-plane
-        theta_x = np.arctan2(vector[1], vector[2])
-        # Create the rotation matrix around the x-axis
-        rotation_matrix_x = np.array([[1, 0, 0],
-                                    [0, np.cos(theta_x), -np.sin(theta_x)],
-                                    [0, np.sin(theta_x), np.cos(theta_x)]])
-        # Rotate the vector around the x-axis
-        vector_on_xz_plane = np.dot(rotation_matrix_x, vector)
 
+        # 1. Second, we find the Euler angles that rotate around the x and y-axis (alpha and beta, respectively).
+        # 1.0. Calculate the rotation angle around the x-axis to align the vector with the xz-plane.
+        alpha = np.arctan2(vector[1], vector[2])
+        # 1.1. Create the rotation matrix around the x-axis.
+        rotation_matrix_x = np.array([[1, 0, 0],
+                                    [0, np.cos(alpha), -np.sin(alpha)],
+                                    [0, np.sin(alpha), np.cos(alpha)]])
+        # 1.2. Rotate the vector around the x-axis.
+        vector_on_xz_plane = np.dot(rotation_matrix_x, vector)
         vector = vector_on_xz_plane
-        # Calculate the rotation angle around the y-axis to align the vector on the xz-plane with the z-axis
-        theta_y = np.arctan2(vector[2], vector[0]) - np.pi/2
-        theta_z = 0
-        return np.array((theta_x, theta_y, theta_z))*180/np.pi
+        # 1.3. Calculate the rotation angle around the y-axis to align the vector on the xz-plane with the z-axis.
+        beta = np.arctan2(vector[2], vector[0]) - np.pi/2
+
+        # 2. Finally, we the Euler angle that rotates around the z-axis.
+        gamma = self.find_gamma(x_for_fitting, y_for_fitting, z_for_fitting, vector)
+        return np.array((alpha, beta, gamma))*180/np.pi
+    
+    def find_gamma(self, x, y, z, vector_normal_to_plane):
+        """ Find the Euler angle that rotates around the z-axis. """
+        # 0. First, we align the molecule with the xy-plane.
+        # 0.0. Get the plane that fits best all the atoms in the molecule.
+        nx, ny, nz = vector_normal_to_plane
+        # 0.1. Find rotation axis and angle between that plane and the z-axis.
+        ux, uy, uz = np.cross([nx, ny, nz], [0, 0, 1])
+        theta = np.arccos(nz)
+        row1 = [np.cos(theta) + ux ** 2 * (1 - np.cos(theta)),
+                ux * uy * (1 - np.cos(theta)) - uz * np.sin(theta),
+                ux * uz * (1 - np.cos(theta)) + uy * np.sin(theta)]
+        row2 = [uy * ux * (1 - np.cos(theta)) + uz * np.sin(theta),
+                np.cos(theta) + uy ** 2 * (1 - np.cos(theta)),
+                uy * uz * (1 - np.cos(theta)) - ux * np.sin(theta)]
+        row3 = [uz * ux * (1 - np.cos(theta)) - uy * np.sin(theta),
+                uz * uy * (1 - np.cos(theta)) + ux * np.sin(theta),
+                np.cos(theta) + uz ** 2 * (1 - np.cos(theta))]
+        rot_matrix = np.array([row1, row2, row3])
+        # 0.2. Rotate and save new positions
+        for index in range(self.no_atoms):
+            r0 = np.array([x[index], y[index], z[index]])
+            rf = np.matmul(rot_matrix, r0)
+            x[index], y[index], z[index] = rf
+
+        # 1. Then, we find on symmetry axis of the molecule (if any) and align it with the x-axis.
+        # 1.0. Convert the points to a numpy array for easier calculations.
+        points = []
+        for index in range(self.no_atoms):
+            points.append((x[index], y[index]))
+        points = np.array(points)
+        # 1.1. Perform Singular Value Decomposition (SVD) on the points.
+        _, _, vh = np.linalg.svd(points)
+        # 1.2. Extract the left singular vector corresponding to the smallest singular value.
+        symmetry_axis_vector = vh[0]
+        # 1.3. Calculate the angle of the symmetry axis with the x-axis.
+        angle = -np.arctan2(symmetry_axis_vector[1], symmetry_axis_vector[0])
+        return angle
 
 
 # Generate the new filtered CUBE file
@@ -302,7 +348,7 @@ for file in raw_CUBE_files:
     orbital.apply_gaussian_filter(sigma=sigma)
     orbital.write_cube_file(f'filtered_{orbital.filename}', sigma)
     file_no += 1
-euler_angles = orbital.get_angles_to_rotate_molecule_towards_z_axis()
+euler_angles = orbital.get_euler_angles()
 
 ##############################################################################
 """This part is for the plotting of the isosurfaces using VMD."""
