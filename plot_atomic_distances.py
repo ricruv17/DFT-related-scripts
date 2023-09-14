@@ -7,8 +7,12 @@ Version 1 (28/03/23) known bugs:
     - When plotting the bonds between all atoms except H, bonds further away from the real bonding distances are
     detected in metallic atoms. Those bonds are being hidden, but the colorbar is scaled incorrectly.
 Version 2 (06/04/23). No known bugs.
-This is version 3 (04/05/23).
+Version 3 (04/05/23).
     - Added capability to read file name from command line input.
+    Known bugs:
+    - Fails to plot structures with more than 162 atoms. More extensive testing and fixing is needed.
+Version 4 (14/09/23).
+    - Added capability to alignt the symmetry axis of a molecule with the x-axis.
     Known bugs:
     - Fails to plot structures with more than 162 atoms. More extensive testing and fixing is needed.
 
@@ -215,12 +219,6 @@ class MoleculeGraph:
             self.y.append(float(line[2]))
             self.z.append(float(line[3]))
         self.atomic_radii = [atomic_radii[element] for element in self.elements]
-        self.translate_molecules_centroid_to_origin()
-        self.rotate_molecule_towards_z_axis()
-        self.align_molecule_with_x_axis()
-        self.ask_type_of_bonds_drawn()
-        self.calculate_interatomic_distances_and_angles()
-        self.exclude_nonbonding_atoms()
 
     def translate_molecules_centroid_to_origin(self):
         # Name is self-explanatory.
@@ -260,18 +258,27 @@ class MoleculeGraph:
             rf = np.matmul(rot_matrix, r0)
             self.x[index], self.y[index], self.z[index] = rf
 
+
     def align_molecule_with_x_axis(self):
         # Name is self-explanatory. Sections of the function will be explained.
-        # 0. Find the straight line that fits best the atoms in the xy-plane and its angle-difference with the x-axis.
-        min_squares_matrix = np.array([[1] * self.no_atoms, self.x]).T
-        n = np.dot(np.matmul(np.linalg.inv(np.matmul(min_squares_matrix.T, min_squares_matrix)), min_squares_matrix.T),
-                   np.array(self.y))
-        u = np.array([1, n[1]]) - np.array([0, n[0]])
-        u = u/np.linalg.norm(u)
-        optimal_theta = np.arccos(u[0])
-        # 1. Rotate and save new positions.
-        row1 = [np.cos(optimal_theta), -np.sin(optimal_theta)]
-        row2 = [np.sin(optimal_theta), np.cos(optimal_theta)]
+        # 0. Convert the points to a numpy array for easier calculations
+        points = []
+        for index in range(self.no_atoms):
+            points.append((self.x[index], self.y[index]))
+        points = np.array(points)
+
+        # 1. Perform Singular Value Decomposition (SVD) on the points
+        _, _, vh = np.linalg.svd(points)
+
+        # 2. Extract the right singular vector corresponding to the smallest singular value
+        symmetry_axis_vector = vh[0]
+
+        # 3. Calculate the angle of the symmetry axis with the x-axis
+        angle = -np.arctan2(symmetry_axis_vector[1], symmetry_axis_vector[0])
+
+        # 4. Rotate and save new positions.
+        row1 = [np.cos(angle), -np.sin(angle)]
+        row2 = [np.sin(angle), np.cos(angle)]
         rot_matrix = np.array([row1, row2])
         for index in range(self.no_atoms):
             r0 = np.array([self.x[index], self.y[index]])
@@ -382,6 +389,7 @@ class MoleculeGraph:
                 return False
         return True
 
+
     def plot_molecule(self):
         # Name is self-explanatory. Sections of the function will be explained.
         # 0. Create the figure and colormap objects and position the molecule for correct visualization.
@@ -427,4 +435,10 @@ class MoleculeGraph:
 # Default file is "geometry.out.xyz". Script will ask for another file if not found.
 molecule = MoleculeGraph()
 molecule.read_xyz_file()
+molecule.translate_molecules_centroid_to_origin()
+molecule.rotate_molecule_towards_z_axis()
+molecule.align_molecule_with_x_axis()
+molecule.ask_type_of_bonds_drawn()
+molecule.calculate_interatomic_distances_and_angles()
+molecule.exclude_nonbonding_atoms()
 molecule.plot_molecule()
