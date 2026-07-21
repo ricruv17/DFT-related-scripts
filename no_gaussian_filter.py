@@ -45,25 +45,6 @@ for ($a = 0; $a -lt $sigmas.Length; $a++) {
                 Rename-Item -Path ".\orbitals_spin_2.svg" -NewName "sigma${sigma}_iso${iso}_spin2.svg"
         }
 }    
-
-
-This is in bash:
-for sigma in 6 7 5
-do
-	pyton3 plot_molecular_orbital_surfaces.py $sigma 1.0e-2
-	mv orbitals_spin_1.svg sigma${sigma}_iso1.0e-2_spin1.svg
-	mv orbitals_spin_2.svg sigma${sigma}_iso1.0e-2_spin2.svg
-	mv orbitals_spin_1.png sigma${sigma}_iso1.0e-2_spin1.png
-	mv orbitals_spin_2.png sigma${sigma}_iso1.0e-2_spin2.png
-	for iso in 1.0e-3 1.5e-3 1.0e-4
-	do
-		python3 plot_molecular_orbital_surfaces_no_gaussian_filter.py $sigma $iso
-		mv orbitals_spin_1.svg sigma${sigma}_iso${iso}_spin1.svg
-		mv orbitals_spin_2.svg sigma${sigma}_iso${iso}_spin2.svg
-		mv orbitals_spin_1.png sigma${sigma}_iso${iso}_spin1.png
-		mv orbitals_spin_2.png sigma${sigma}_iso${iso}_spin2.png
-	done
-done
 """
 from __future__ import print_function
 import argparse
@@ -381,10 +362,10 @@ for file in raw_CUBE_files:
     orbital.filename = file
     print(f'Filtering {orbital.filename} ({file_no} out of {len(raw_CUBE_files)}). Please stand by...')
     orbital.read_cube_file()
-    orbital.apply_gaussian_filter(sigma=sigma)
-    orbital.write_cube_file(f'filtered_{orbital.filename}', sigma)
+#    orbital.apply_gaussian_filter(sigma=sigma)
+#    orbital.write_cube_file(f'filtered_{orbital.filename}', sigma)
     file_no += 1
-euler_angles = orbital.get_euler_angles()
+euler_angles = np.array([180, 0, 0]) #orbital.get_euler_angles()
 
 ##############################################################################
 """This part is for the plotting of the isosurfaces using VMD."""

@@ -1,0 +1,20 @@
+# you may comment svg or pngs, depending on need
+$sigmas = @(5.0, 5.6, 5.8, 6.0, 6.2, 6.4, 6.6, 6.8, 7.0, 7.2, 7.4)
+$isovalues = @(1.0e-2, 1.0e-3, 1.2e-3, 1.4e-3, 1.6e-3, 1.8e-3, 1.0e-4, 1.0e-5) 
+for ($a = 0; $a -lt $sigmas.Length; $a++) {
+		$sigma = $sigmas[$a]
+        $iso = $isovalues[0]
+        python3 plot_molecular_orbital_surfaces.py $sigma $iso
+        Rename-Item -Path ".\orbitals_spin_1.svg" -NewName "sigma${sigma}_iso${iso}_spin1.svg"
+        Rename-Item -Path ".\orbitals_spin_2.svg" -NewName "sigma${sigma}_iso${iso}_spin2.svg"
+        Rename-Item -Path ".\orbitals_spin_1.png" -NewName "sigma${sigma}_iso${iso}_spin1.png"
+        Rename-Item -Path ".\orbitals_spin_2.png" -NewName "sigma${sigma}_iso${iso}_spin2.png"
+        for ($b = 1; $b -lt $isovalues.Length; $b++) {
+				$iso = $isovalues[$b]
+                python3 no_gaussian_filter.py $sigma $iso
+                Rename-Item -Path ".\orbitals_spin_1.svg" -NewName "sigma${sigma}_iso${iso}_spin1.svg"
+                Rename-Item -Path ".\orbitals_spin_2.svg" -NewName "sigma${sigma}_iso${iso}_spin2.svg"
+				Rename-Item -Path ".\orbitals_spin_1.png" -NewName "sigma${sigma}_iso${iso}_spin1.png"
+				Rename-Item -Path ".\orbitals_spin_2.png" -NewName "sigma${sigma}_iso${iso}_spin2.png"
+        }
+}

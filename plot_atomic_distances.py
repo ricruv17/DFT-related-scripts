@@ -12,7 +12,7 @@ Version 3 (04/05/23).
     Known bugs:
     - Fails to plot structures with more than 162 atoms. More extensive testing and fixing is needed.
 Version 4 (14/09/23).
-    - Added capability to alignt the symmetry axis of a molecule with the x-axis.
+    - Added capability to align the symmetry axis of a molecule with the x-axis.
     Known bugs:
     - Fails to plot structures with more than 162 atoms. More extensive testing and fixing is needed.
 
