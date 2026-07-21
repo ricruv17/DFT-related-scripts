@@ -44,8 +44,7 @@ for ($a = 0; $a -lt $sigmas.Length; $a++) {
                 Rename-Item -Path ".\orbitals_spin_1.svg" -NewName "sigma${sigma}_iso${iso}_spin1.svg"
                 Rename-Item -Path ".\orbitals_spin_2.svg" -NewName "sigma${sigma}_iso${iso}_spin2.svg"
         }
-}    
-
+}
 
 This is in bash:
 for sigma in 6 7 5
@@ -381,8 +380,8 @@ for file in raw_CUBE_files:
     orbital.filename = file
     print(f'Filtering {orbital.filename} ({file_no} out of {len(raw_CUBE_files)}). Please stand by...')
     orbital.read_cube_file()
-    orbital.apply_gaussian_filter(sigma=sigma)
-    orbital.write_cube_file(f'filtered_{orbital.filename}', sigma)
+#    orbital.apply_gaussian_filter(sigma=sigma)
+#    orbital.write_cube_file(f'filtered_{orbital.filename}', sigma)
     file_no += 1
 euler_angles = orbital.get_euler_angles()
 

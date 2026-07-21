@@ -53,8 +53,8 @@ def store_files_in_list():
         lines = []
         for line in file_in:
             lines.append(line)
-    if 'Invoking FHI-aims ...' not in lines[1]:
-        print(f'\nERROR: File {filename} is not a FHI-aims output file.')
+    if 'Invoking FHI-aims ...' not in lines[2]:
+        print(f'\nWARNING: File {filename} is not a FHI-aims output file.')
         sys.argv[1] = input('Please enter the name of a valid FHI-aims output file:\n')
         return store_files_in_list()
     return lines
@@ -83,11 +83,10 @@ def ask_type_of_energy():
         is_rounded = False
     return is_rounded
 
-
 # 2. Determine the number of KS states and the energy tolerance in the system
 file = store_files_in_list()
 
-if 'Have a nice day.' not in file[-2]:
+if ('Have a nice day.' not in file[-2]) or ('Have a nice day.' not in file[-1]):
     print('\nWARNING: the calculation did not end properly.\nResults may be inaccurate.')
 
 no_of_KS_states_found = False
@@ -96,14 +95,28 @@ for index, line in enumerate(file):
     if 'Number of Kohn-Sham states (occupied + empty):' in line:
         no_of_KS_states = file[index].split()
         no_of_KS_states_found = True
-    if 'energy_tolerance' in line:
+    if 'energy tolerance' in line:
         energy_tolerance = file[index].split()
         is_energy_tolerance_found = True
     if no_of_KS_states_found and is_energy_tolerance_found:
         break
 
+file.reverse()
+fermi_energies_found = False
+for index, line in enumerate(file):
+    if 'Chemical potential (Fermi level):' in line:
+        fermi_level_nonpolarized = float(file[index].split()[-2])
+        fermi_energies_found = True
+    elif 'Chemical potential, spin up' in line:
+        fermi_level_dn = float(file[index-1].split()[-2])
+        fermi_level_up = float(file[index].split()[-2])
+        fermi_energies_found = True
+    if fermi_energies_found:
+        break
+file.reverse()
+
 no_of_KS_states = int(no_of_KS_states[-1])
-energy_tolerance = float(energy_tolerance[-1])  # in eV
+energy_tolerance = 0.003 #float(energy_tolerance[-1])  # in eV
 energy_tolerance_decimal_string = ("%.10f" % energy_tolerance).rstrip('0').rstrip('.')
 # rounding_criteria = energy_tolerance_decimal_string[::-1].find('.')
 
@@ -167,23 +180,35 @@ if calculation_is_spin_polarized:
               f'\nThe maximum available ({dn_max_available_UMO_orbitals}) will be used instead.')
         dn_no_UMOs = dn_max_available_UMO_orbitals
     
-    print('\n  Selected eigenvalues:')
-    print('  State    Occupation    Eigenvalue [Ha]    Eigenvalue [eV]')
-    print('  Spin-up eigenvalues')
-    line_lower_limit = eigenvalues_index + 5 + up_HOMO_index - up_no_OMOs - 1
-    line_upper_limit = eigenvalues_index + 5 + up_LUMO_index + up_no_UMOs
-    for line in file[line_lower_limit: line_upper_limit]:
-        print(line[:-1])
-    print('  Spin-down eigenvalues')
-    line_lower_limit = eigenvalues_index + 5 + no_of_KS_states + 4 + dn_HOMO_index - dn_no_OMOs - 1
-    line_upper_limit = eigenvalues_index + 5 + no_of_KS_states + 4 + dn_LUMO_index + dn_no_UMOs
-    for line in file[line_lower_limit: line_upper_limit]:
-        print(line[:-1])
+    up_plotted_orbitals = up_orbitals_data[up_HOMO_index - up_no_OMOs: up_LUMO_index + up_no_UMOs + 1]
+    dn_plotted_orbitals = dn_orbitals_data[dn_HOMO_index - dn_no_OMOs: dn_LUMO_index + dn_no_UMOs + 1]
+
+    print(f'\n  Fermi level (spin-up) is {fermi_level_up} eV')
+    print(f'  Fermi level (spin-dn) is {fermi_level_dn} eV')
+    for spin in ['up', 'dn']:
+        if spin == 'up':
+            plotted_orbitals = up_plotted_orbitals
+            fermi_level = fermi_level_up
+        elif spin == 'dn':
+            plotted_orbitals = dn_plotted_orbitals
+            fermi_level = fermi_level_dn
+        print(f'\n  Spin-{spin} raw eigenvalues:')
+        print('  State    Occupation    Eigenvalue [Ha]    Eigenvalue [eV]')
+        for orbital in plotted_orbitals:
+            a, b, c, d = orbital
+            print(f"{a:7d} {b:13.5f} {c:18.6f} {d:18.5f}")
+
+        print(f'  Spin-{spin} plotted eigenvalues:')
+        print('  State    Occupation    Eigenvalue [Ha]    Eigenvalue [eV]')
+        for orbital in plotted_orbitals:
+            orbital[3] -= fermi_level
+            orbital[2] = orbital[3] * 0.0367492929
+            a, b, c, d = orbital
+            print(f"{a:7d} {b:13.5f} {c:18.6f} {d:18.5f}")
 
     print(f'\nEnergy tolerance in your calculation is ({energy_tolerance_decimal_string} eV).')
     rounding_criteria = save_no_of_orbitals('Enter how many digits after the decimal point you want to'
                                             ' consider for the energy (in eV): ')
-    up_plotted_orbitals = up_orbitals_data[up_HOMO_index - up_no_OMOs: up_LUMO_index + up_no_UMOs + 1]
     up_orbitals_degeneracy = dict()
     orbital_index = -1
     up_max_degeneracy = 0
@@ -199,7 +224,6 @@ if calculation_is_spin_polarized:
         if degeneracy > up_max_degeneracy:
             up_max_degeneracy = degeneracy
 
-    dn_plotted_orbitals = dn_orbitals_data[dn_HOMO_index - dn_no_OMOs: dn_LUMO_index + dn_no_UMOs + 1]
     dn_orbitals_degeneracy = dict()
     orbital_index = -1
     dn_max_degeneracy = 0
@@ -269,10 +293,11 @@ if calculation_is_spin_polarized:
     ax2.plot([-up_max_degeneracy*101, -up_max_degeneracy*100], [max_E_Ha, max_E_Ha], color='k', linewidth=2)
     ax2.plot([-up_max_degeneracy*101, -up_max_degeneracy*100], [min_E_Ha, min_E_Ha], color='k', linewidth=2)
 
+    ax.plot([-(up_max_degeneracy + 0.5) * 1.1, (dn_max_degeneracy + 0.5) * 1.1], [0, 0], 'k--', linewidth=1)
     ax.set(xlim=[-(up_max_degeneracy + 0.5) * 1.1, (dn_max_degeneracy + 0.5) * 1.1])
     ax.set_xlabel("Spin", fontsize=font_size, labelpad=0)
-    ax.set_ylabel(r"Energy (eV)", fontsize=font_size, labelpad=2)
-    ax2.set_ylabel(r"Energy (Ha)", fontsize=font_size, labelpad=5)
+    ax.set_ylabel(r"$E - E_F$ (eV)", fontsize=font_size, labelpad=2)
+    ax2.set_ylabel(r"$E - E_F$ (Ha)", fontsize=font_size, labelpad=5)
     ax.set_xticks([-up_max_degeneracy/2 - 0.5, dn_max_degeneracy/2 + 0.5])
     ax.set_xticklabels([r"$\uparrow$", r"$\downarrow$"], fontsize=font_size)
     ax.tick_params(axis='both', which='major', labelsize=font_size)
@@ -313,16 +338,27 @@ else:
               f'\nThe maximum available ({max_available_UMO_orbitals}) will be used instead.')
         no_UMOs = max_available_UMO_orbitals
     
-    print('\n  Selected eigenvalues:')
-    print('  State    Occupation    Eigenvalue [Ha]    Eigenvalue [eV]')
+    plotted_orbitals = orbitals_data[HOMO_index - no_OMOs: LUMO_index + no_UMOs + 1]
 
-    for line in file[eigenvalues_index + 3 + HOMO_index - no_OMOs - 1: eigenvalues_index + 3 + LUMO_index + no_UMOs]:
-        print(line[:-1])
+    print(f'\n  Fermi level is {fermi_level_nonpolarized} eV')
+    print('  Raw eigenvalues:')
+    print('  State    Occupation    Eigenvalue [Ha]    Eigenvalue [eV]')
+    for orbital in plotted_orbitals:
+        a, b, c, d = orbital
+        print(f"{a:7d} {b:13.5f} {c:18.6f} {d:18.5f}")
+
+    print('\n  Plotted eigenvalues:')
+    print('  State    Occupation    Eigenvalue [Ha]    Eigenvalue [eV]')
+    for orbital in plotted_orbitals:
+        orbital[3] -= fermi_level_nonpolarized
+        orbital[2] = orbital[3] * 0.0367492929
+        a, b, c, d = orbital
+        print(f"{a:7d} {b:13.5f} {c:18.6f} {d:18.5f}")
 
     print(f'\nEnergy tolerance in your calculation is ({energy_tolerance_decimal_string} eV).')
     rounding_criteria = save_no_of_orbitals('Enter how many digits after the decimal point you want to '
                                             'consider for the energy (in eV): ')
-    plotted_orbitals = orbitals_data[HOMO_index - no_OMOs: LUMO_index + no_UMOs + 1]
+
     orbitals_degeneracy = dict()
     orbital_index = -1
     max_degeneracy = 0
@@ -373,13 +409,14 @@ else:
                     linewidth=line_width)
     
     ax2 = ax.twinx()
+    ax.plot([x_position - bar_width, x_position + bar_width], [0, 0], 'k--', linewidth=2)
     ax2.plot([-max_degeneracy*1.1, -max_degeneracy], [max_E_Ha, max_E_Ha], color='k', linewidth=2)
     ax2.plot([-max_degeneracy*1.1, -max_degeneracy], [min_E_Ha, min_E_Ha], color='k', linewidth=2)
 
-    ax.set(xlim=[-max_degeneracy/2 * 1.1, max_degeneracy/2 * 1.1])
+    ax.set(xlim=[-x_position - bar_width, x_position + bar_width])
     ax.set_xlabel("Spin", fontsize=font_size, labelpad=0)
-    ax.set_ylabel(r"Energy (eV)", fontsize=font_size, labelpad=2)
-    ax2.set_ylabel(r"Energy (Ha)", fontsize=font_size, labelpad=5)
+    ax.set_ylabel(r"$E - E_F$ (eV)", fontsize=font_size, labelpad=2)
+    ax2.set_ylabel(r"$E - E_F$ (Ha)", fontsize=font_size, labelpad=5)
     ax.set_xticks([0])
     ax.set_xticklabels([r"$\uparrow \downarrow$"], fontsize=font_size)
     ax.tick_params(axis='both', which='major', labelsize=font_size)

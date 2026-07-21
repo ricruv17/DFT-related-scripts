@@ -3,7 +3,7 @@
  Parameters (in positional order)
 -----------------
  1: string
-    Name/adress of the FHI-aims file to process. 
+    Name/adress of the FHI-aims file to process.
     It can be either aims.out for initial and final positions,
     or geometry.in for only initial positions,
     or geometry.in.next_step for only final positions.
@@ -47,23 +47,23 @@ EOF
 # 1. Process files with geometry. as a prefix.
 if [[ "$1" == geometry* ]]
 then
-    N=$(grep atom $1 | wc -l)
+    N=$(grep -a atom $1 | wc -l)
     echo $N > ${1}.xyz
     echo "Generated from FHI-aims input" >> ${1}.xyz
-    grep atom $1 | awk -f .geometry.out.awk >> ${1}.xyz
+    grep -a atom $1 | awk -f .geometry.out.awk >> ${1}.xyz
     echo "File ${1}.xyz generated."
 # 2. Process files with .out as a suffix.
 elif [[ "$1" == *out ]]
 then
     # Create .xyz file of the input coordinates.
-    N=$(grep "Number of atoms        " $1 | awk '{print $6}')
+    N=$(grep -a "Number of atoms        " $1 | awk '{print $6}')
     echo $N > geometry.in.xyz
     echo "Generated from FHI-aims input" >> geometry.in.xyz
-    grep ": Species " $1 | awk -f .geometry.in.awk >> geometry.in.xyz
+    grep -a ": Species " $1 | awk -f .geometry.in.awk >> geometry.in.xyz
     echo "File geometry.in.xyz generated."
 
     # Set criteria to evaluate if calculation contains relaxed output coordinates.
-    file_ending_line_1=$(tail -n 2 $1 | head -n 1 | tr -s " ") 
+    file_ending_line_1=$(tail -n 2 $1 | head -n 1 | tr -s " ")
     file_ending_line_2=$(tail -n 3 $1 | head -n 1 | tr -s " ") # in case you printed date and time at the end of the aims.out file
     test_script=" Have a nice day."
 
@@ -72,7 +72,7 @@ then
         # Create .xyz file of the output coordinates.
         echo $N > geometry.out.xyz
         echo "Generated from FHI-aims output" >> geometry.out.xyz
-        grep "    atom       " $1 | tail -n ${N} | awk -f .geometry.out.awk >> geometry.out.xyz
+        grep -a "    atom       " $1 | tail -n ${N} | awk -f .geometry.out.awk >> geometry.out.xyz
         echo "File geometry.out.xyz generated."
     else
         # Warn user if there are no output coordinates in the file.
